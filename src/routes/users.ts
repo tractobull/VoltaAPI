@@ -85,7 +85,7 @@ router.post('/login', async (req: Request, res: Response) => {
     );
     
     if (result.rows.length === 0) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return res.status(401).json({ error: 'User not found' });
     }
     
     const user = result.rows[0];

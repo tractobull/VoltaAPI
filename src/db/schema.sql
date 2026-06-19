@@ -15,7 +15,8 @@ CREATE TABLE users (
     password VARCHAR(255) NOT NULL,
     role user_role DEFAULT 'CUSTOMER',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW().
+    stripe_customer_id VARCHAR(255) UNIQUE
 );
 
 -- ==================== DIRECCIONES ====================
