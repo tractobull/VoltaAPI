@@ -1,7 +1,9 @@
 import { Router, Request, Response } from 'express';
 import pool from '../db/pool';
+import { ChatService } from '../services/chatService';
 
 const router = Router();
+const chatService = new ChatService();
 
 // GET /api/products/search - Search products with pagination
 router.get('/search', async (req: Request, res: Response) => {
@@ -81,6 +83,26 @@ router.get('/search', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error searching products:', error);
     res.status(500).json({ error: 'Error searching products' });
+  }
+});
+
+// POST /api/products/ai-search - Search products using AI
+router.post('/ai-search', async (req: Request, res: Response) => {
+  try {
+    const { query } = req.body;
+
+    if (!query || typeof query !== 'string') {
+      return res.status(400).json({ error: 'Query is required' });
+    }
+
+    const result = await chatService.sendMessage([
+      { role: 'user', content: `Busca productos de repuestos para camiones pesados relacionados con: "${query}". Responde SOLO en español listando los productos más relevantes de nuestro catálogo. Usa EXACTAMENTE el formato [producto:id] para cada producto. Máximo 3 productos. Si no hay coincidencias, di que no encontraste productos.` }
+    ]);
+
+    res.json({ content: result.content, sessionId: result.sessionId });
+  } catch (error) {
+    console.error('Error in AI search:', error);
+    res.status(500).json({ error: 'Error in AI search' });
   }
 });
 
