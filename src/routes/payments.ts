@@ -2,6 +2,22 @@ import { Router, Request, Response } from 'express';
 import Stripe from 'stripe';
 import pool from '../db/pool';
 
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      if (error?.type === 'StripeRateLimitError' && i < maxRetries - 1) {
+        const delay = Math.pow(2, i) * 1000;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error('Max retries exceeded');
+}
+
 const router = Router();
 
 // Initialize Stripe with test key (sandbox mode)
@@ -23,11 +39,13 @@ router.post('/customer', async (req: Request, res: Response) => {
     }
 
     // Create new Stripe customer
-    const customer = await stripe.customers.create({
-      email,
-      name,
-      metadata: { userId },
-    });
+    const customer = await withRetry(() =>
+      stripe.customers.create({
+        email,
+        name,
+        metadata: { userId },
+      })
+    );
 
     // Save customer ID to user record
     await pool.query(
@@ -36,8 +54,11 @@ router.post('/customer', async (req: Request, res: Response) => {
     );
 
     res.json({ customerId: customer.id });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error creating Stripe customer:', error);
+    if (error?.type === 'StripeRateLimitError') {
+      return res.status(429).json({ error: 'Rate limit exceeded. Please try again later.' });
+    }
     res.status(500).json({ error: 'Error creating customer' });
   }
 });
@@ -51,13 +72,18 @@ router.post('/setup-intent', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Customer ID required' });
     }
 
-    const setupIntent = await stripe.setupIntents.create({
-      customer: customerId,
-    });
+    const setupIntent = await withRetry(() =>
+      stripe.setupIntents.create({
+        customer: customerId,
+      })
+    );
 
     res.json({ clientSecret: setupIntent.client_secret });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error creating SetupIntent:', error);
+    if (error?.type === 'StripeRateLimitError') {
+      return res.status(429).json({ error: 'Rate limit exceeded. Please try again later.' });
+    }
     res.status(500).json({ error: 'Error creating setup intent' });
   }
 });
@@ -67,10 +93,12 @@ router.get('/methods/:customerId', async (req: Request, res: Response) => {
   try {
     const customerId = req.params.customerId as string;
 
-    const paymentMethods = await stripe.paymentMethods.list({
-      customer: customerId,
-      type: 'card',
-    });
+    const paymentMethods = await withRetry(() =>
+      stripe.paymentMethods.list({
+        customer: customerId,
+        type: 'card',
+      })
+    );
 
     // Get the default payment method for this customer
     const customer = await stripe.customers.retrieve(customerId);
@@ -86,8 +114,11 @@ router.get('/methods/:customerId', async (req: Request, res: Response) => {
     }));
 
     res.json(methods);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error listing payment methods:', error);
+    if (error?.type === 'StripeRateLimitError') {
+      return res.status(429).json({ error: 'Rate limit exceeded. Please try again later.' });
+    }
     res.status(500).json({ error: 'Error listing payment methods' });
   }
 });
@@ -97,15 +128,20 @@ router.post('/set-default', async (req: Request, res: Response) => {
   try {
     const { customerId, paymentMethodId } = req.body;
 
-    await stripe.customers.update(customerId, {
-      invoice_settings: {
-        default_payment_method: paymentMethodId,
-      },
-    });
+    await withRetry(() =>
+      stripe.customers.update(customerId, {
+        invoice_settings: {
+          default_payment_method: paymentMethodId,
+        },
+      })
+    );
 
     res.json({ success: true });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error setting default payment method:', error);
+    if (error?.type === 'StripeRateLimitError') {
+      return res.status(429).json({ error: 'Rate limit exceeded. Please try again later.' });
+    }
     res.status(500).json({ error: 'Error setting default payment method' });
   }
 });

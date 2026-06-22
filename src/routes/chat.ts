@@ -57,10 +57,12 @@ router.get('/suggested/prompts', (req: Request, res: Response) => {
   const prompts = [
     'Mi camión frena mal, ¿qué necesito?',
     'Filtro de aceite para Freightliner Cascadia',
+    '¿Cómo funcionan los puntos Volta?',
     '¿Tienen alternadores para Kenworth?',
-    'Necesito pastillas de freno',
-    'Turbo para Peterbilt 579',
-    '¿Cuánto cuesta una batería 12V?',
+    '¿Cuánto cuesta el envío a domicilio?',
+    '¿Puedo recoger en tienda?',
+    '¿Qué métodos de pago aceptan?',
+    'Pastillas de freno para Peterbilt 579',
   ];
   res.json({ prompts });
 });

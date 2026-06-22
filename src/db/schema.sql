@@ -14,8 +14,9 @@ CREATE TABLE users (
     phone VARCHAR(20) UNIQUE,
     password VARCHAR(255) NOT NULL,
     role user_role DEFAULT 'CUSTOMER',
+    points INTEGER DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW().
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     stripe_customer_id VARCHAR(255) UNIQUE
 );
 
@@ -34,6 +35,8 @@ CREATE TABLE addresses (
     country VARCHAR(2) DEFAULT 'MX',
     is_default BOOLEAN DEFAULT FALSE,
     reference_notes TEXT DEFAULT '',
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

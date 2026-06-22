@@ -8,7 +8,7 @@ const router = Router();
 router.get('/', async (req: Request, res: Response) => {
   try {
     const result = await pool.query(
-      'SELECT id, email, name, phone, role, created_at, updated_at FROM users ORDER BY created_at DESC'
+      'SELECT id, email, name, phone, role, points, created_at, updated_at FROM users ORDER BY created_at DESC'
     );
     res.json(result.rows);
   } catch (error) {
@@ -22,7 +22,7 @@ router.get('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
-      'SELECT id, email, name, phone, role, created_at, updated_at FROM users WHERE id = $1',
+      'SELECT id, email, name, phone, role, points, created_at, updated_at FROM users WHERE id = $1',
       [id]
     );
     
@@ -59,7 +59,7 @@ router.post('/', async (req: Request, res: Response) => {
     const result = await pool.query(
       `INSERT INTO users (email, name, phone, password, role) 
        VALUES ($1, $2, $3, $4, $5) 
-       RETURNING id, email, name, phone, role, created_at, updated_at`,
+       RETURNING id, email, name, phone, role, points, created_at, updated_at`,
       [email, name, phone, hashedPassword, role || 'CUSTOMER']
     );
     
@@ -80,7 +80,7 @@ router.post('/login', async (req: Request, res: Response) => {
     }
     
     const result = await pool.query(
-      'SELECT id, email, name, phone, role, password FROM users WHERE email = $1',
+      'SELECT id, email, name, phone, role, points, password FROM users WHERE email = $1',
       [email]
     );
     
@@ -102,6 +102,7 @@ router.post('/login', async (req: Request, res: Response) => {
       name: user.name,
       phone: user.phone,
       role: user.role,
+      points: user.points || 0,
       created_at: user.created_at,
       updated_at: user.updated_at
     });
@@ -124,7 +125,7 @@ router.put('/:id', async (req: Request, res: Response) => {
            role = COALESCE($3, role),
            updated_at = NOW()
        WHERE id = $4
-       RETURNING id, email, name, phone, role, created_at, updated_at`,
+       RETURNING id, email, name, phone, role, points, created_at, updated_at`,
       [name, phone, role, id]
     );
     
@@ -151,6 +152,95 @@ router.delete('/:id', async (req: Request, res: Response) => {
   }
 });
 
+// ==================== USER POINTS ====================
+
+// GET /api/users/:id/points - Get user points
+router.get('/:id/points', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      'SELECT points FROM users WHERE id = $1',
+      [id]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    res.json({ points: result.rows[0].points || 0 });
+  } catch (error) {
+    console.error('Error fetching points:', error);
+    res.status(500).json({ error: 'Error fetching points' });
+  }
+});
+
+// POST /api/users/:id/points - Add points
+router.post('/:id/points', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { points, description } = req.body;
+    
+    if (!points || points <= 0) {
+      return res.status(400).json({ error: 'Points must be a positive number' });
+    }
+    
+    const result = await pool.query(
+      `UPDATE users 
+       SET points = COALESCE(points, 0) + $1,
+           updated_at = NOW()
+       WHERE id = $2
+       RETURNING id, points`,
+      [points, id]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    res.json({ points: result.rows[0].points });
+  } catch (error) {
+    console.error('Error adding points:', error);
+    res.status(500).json({ error: 'Error adding points' });
+  }
+});
+
+// POST /api/users/:id/points/deduct - Deduct points
+router.post('/:id/points/deduct', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { points, description } = req.body;
+    
+    if (!points || points <= 0) {
+      return res.status(400).json({ error: 'Points must be a positive number' });
+    }
+    
+    // Check if user has enough points
+    const userCheck = await pool.query('SELECT points FROM users WHERE id = $1', [id]);
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const currentPoints = userCheck.rows[0].points || 0;
+    if (currentPoints < points) {
+      return res.status(400).json({ error: 'Insufficient points' });
+    }
+    
+    const result = await pool.query(
+      `UPDATE users 
+       SET points = points - $1,
+           updated_at = NOW()
+       WHERE id = $2
+       RETURNING id, points`,
+      [points, id]
+    );
+    
+    res.json({ points: result.rows[0].points });
+  } catch (error) {
+    console.error('Error deducting points:', error);
+    res.status(500).json({ error: 'Error deducting points' });
+  }
+});
+
 // ==================== USER ADDRESSES ====================
 
 // GET /api/users/:id/addresses - Get user addresses
@@ -172,13 +262,13 @@ router.get('/:id/addresses', async (req: Request, res: Response) => {
 router.post('/:id/addresses', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { label, street, number, colony, city, state, zipCode, country, isDefault, references } = req.body;
+    const { label, street, number, colony, city, state, zipCode, country, isDefault, references, latitude, longitude } = req.body;
     
     const result = await pool.query(
-      `INSERT INTO addresses (user_id, label, street, number, colony, city, state, zip_code, country, is_default, reference_notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `INSERT INTO addresses (user_id, label, street, number, colony, city, state, zip_code, country, is_default, reference_notes, latitude, longitude)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING *`,
-      [id, label, street, number || '', colony || '', city, state, zipCode, country || 'MX', isDefault || false, references || '']
+      [id, label, street, number || '', colony || '', city, state, zipCode, country || 'MX', isDefault || false, references || '', latitude || null, longitude || null]
     );
     
     res.status(201).json(result.rows[0]);
@@ -192,7 +282,7 @@ router.post('/:id/addresses', async (req: Request, res: Response) => {
 router.put('/:userId/addresses/:addressId', async (req: Request, res: Response) => {
   try {
     const { userId, addressId } = req.params;
-    const { label, street, number, colony, city, state, zipCode, isDefault, references } = req.body;
+    const { label, street, number, colony, city, state, zipCode, isDefault, references, latitude, longitude } = req.body;
     
     const result = await pool.query(
       `UPDATE addresses 
@@ -205,10 +295,12 @@ router.put('/:userId/addresses/:addressId', async (req: Request, res: Response) 
            zip_code = COALESCE($7, zip_code),
            is_default = COALESCE($8, is_default),
            reference_notes = COALESCE($9, reference_notes),
+           latitude = COALESCE($10, latitude),
+           longitude = COALESCE($11, longitude),
            updated_at = NOW()
-       WHERE id = $10 AND user_id = $11
+       WHERE id = $12 AND user_id = $13
        RETURNING *`,
-      [label, street, number, colony, city, state, zipCode, isDefault, references, addressId, userId]
+      [label, street, number, colony, city, state, zipCode, isDefault, references, latitude, longitude, addressId, userId]
     );
     
     if (result.rows.length === 0) {

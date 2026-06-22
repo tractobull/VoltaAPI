@@ -3,6 +3,87 @@ import pool from '../db/pool';
 
 const router = Router();
 
+// GET /api/products/search - Search products with pagination
+router.get('/search', async (req: Request, res: Response) => {
+  try {
+    const { q, category, brand, page, limit } = req.query;
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
+    const offset = (pageNum - 1) * limitNum;
+    
+    let whereClause = 'WHERE 1=1';
+    const params: any[] = [];
+    let paramIndex = 1;
+
+    if (q) {
+      whereClause += ` AND (p.name ILIKE $${paramIndex} OR p.description ILIKE $${paramIndex} OR b.name ILIKE $${paramIndex})`;
+      params.push(`%${q}%`);
+      paramIndex++;
+    }
+    if (category) {
+      whereClause += ` AND p.category_id = $${paramIndex++}`;
+      params.push(category);
+    }
+    if (brand) {
+      whereClause += ` AND p.brand_id = $${paramIndex++}`;
+      params.push(brand);
+    }
+
+    const countResult = await pool.query(
+      `SELECT COUNT(*) FROM products p JOIN brands b ON p.brand_id = b.id ${whereClause}`,
+      params
+    );
+    const total = Number(countResult.rows[0].count);
+
+    const query = `
+      SELECT p.*, b.name as brand_name, b.logo as brand_logo, 
+             c.name as category_name, c.icon as category_icon
+      FROM products p
+      JOIN brands b ON p.brand_id = b.id
+      JOIN categories c ON p.category_id = c.id
+      ${whereClause}
+      ORDER BY p.name ASC
+      LIMIT $${paramIndex++} OFFSET $${paramIndex++}
+    `;
+    params.push(limitNum, offset);
+
+    const result = await pool.query(query, params);
+    
+    const products = await Promise.all(result.rows.map(async (product) => {
+      const vehicleResult = await pool.query(
+        'SELECT * FROM vehicle_compatibility WHERE product_id = $1',
+        [product.id]
+      );
+      return {
+        id: product.id,
+        name: product.name,
+        price: Number(product.price),
+        image: product.image,
+        available: product.available,
+        description: product.description,
+        brand: product.brand_name,
+        categoryId: product.category_id,
+        vehicleCompatibility: vehicleResult.rows[0] || null,
+        created_at: product.created_at,
+        updated_at: product.updated_at,
+      };
+    }));
+
+    res.json({
+      products,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    });
+  } catch (error) {
+    console.error('Error searching products:', error);
+    res.status(500).json({ error: 'Error searching products' });
+  }
+});
+
 // GET /api/products - Get all products
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -32,7 +113,7 @@ router.get('/', async (req: Request, res: Response) => {
       params.push(available === 'true');
     }
     if (search) {
-      query += ` AND (p.name ILIKE $${paramIndex} OR p.description ILIKE $${paramIndex})`;
+      query += ` AND (p.name ILIKE $${paramIndex} OR p.description ILIKE $${paramIndex} OR b.name ILIKE $${paramIndex})`;
       params.push(`%${search}%`);
       paramIndex++;
     }
@@ -41,7 +122,6 @@ router.get('/', async (req: Request, res: Response) => {
 
     const result = await pool.query(query, params);
     
-    // Get vehicle compatibility for each product
     const products = await Promise.all(
       result.rows.map(async (product) => {
         const vehicleResult = await pool.query(
@@ -49,30 +129,22 @@ router.get('/', async (req: Request, res: Response) => {
           [product.id]
         );
         return {
-          ...product,
+          id: product.id,
+          name: product.name,
+          price: product.price,
+          image: product.image,
+          available: product.available,
+          description: product.description,
           brand: { id: product.brand_id, name: product.brand_name, logo: product.brand_logo },
           category: { id: product.category_id, name: product.category_name, icon: product.category_icon },
           vehicles: vehicleResult.rows,
+          created_at: product.created_at,
+          updated_at: product.updated_at,
         };
       })
     );
 
-    // Remove duplicate fields
-    const cleanedProducts = products.map(p => ({
-      id: p.id,
-      name: p.name,
-      price: p.price,
-      image: p.image,
-      available: p.available,
-      description: p.description,
-      brand: p.brand,
-      category: p.category,
-      vehicles: p.vehicles,
-      created_at: p.created_at,
-      updated_at: p.updated_at,
-    }));
-
-    res.json(cleanedProducts);
+    res.json(products);
   } catch (error) {
     console.error('Error fetching products:', error);
     res.status(500).json({ error: 'Error fetching products' });
