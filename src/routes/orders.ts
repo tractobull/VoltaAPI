@@ -132,16 +132,29 @@ router.post('/', async (req: Request, res: Response) => {
     await client.query('COMMIT');
 
     const fullOrderResult = await client.query(
-      `SELECT o.*, od.items, od.tracking FROM orders o
-       LEFT JOIN LATERAL jsonb_build_object(
-         'items', (SELECT jsonb_agg(jsonb_build_object('id', oi.id, 'productId', oi.product_id, 'quantity', oi.quantity, 'price', oi.price, 'originalPrice', (oi.snapshot->>'originalPrice')::numeric, 'discountPercent', (oi.snapshot->>'discountPercent')::numeric)) FROM order_items oi WHERE oi.order_id = o.id),
-         'tracking', o.tracking_data
-       ) od ON true
-       WHERE o.id = $1`,
+      `SELECT o.*,
+        jsonb_agg(jsonb_build_object(
+          'id', oi.id,
+          'productId', oi.product_id,
+          'quantity', oi.quantity,
+          'price', oi.price,
+          'originalPrice', (oi.snapshot->>'originalPrice')::numeric,
+          'discountPercent', (oi.snapshot->>'discountPercent')::numeric
+        )) as items
+      FROM orders o
+      LEFT JOIN order_items oi ON o.id = oi.order_id
+      WHERE o.id = $1
+      GROUP BY o.id`,
       [order.id]
     );
 
-    res.status(201).json(fullOrderResult.rows[0]);
+    const orderWithItems = fullOrderResult.rows[0];
+    const response = {
+      ...orderWithItems,
+      tracking: orderWithItems.tracking_data,
+    };
+
+    res.status(201).json(response);
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Error creating order:', error);
