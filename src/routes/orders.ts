@@ -10,8 +10,11 @@ router.get('/', async (req: Request, res: Response) => {
       `SELECT o.*, json_agg(json_build_object(
         'id', oi.id,
         'product_id', oi.product_id,
+        'name', oi.snapshot->>'name',
         'quantity', oi.quantity,
-        'price', oi.price
+        'price', oi.price,
+        'originalPrice', (oi.snapshot->>'originalPrice')::numeric,
+        'discountPercent', (oi.snapshot->>'discountPercent')::numeric
       )) as items
       FROM orders o
       LEFT JOIN order_items oi ON o.id = oi.order_id
@@ -33,8 +36,11 @@ router.get('/:id', async (req: Request, res: Response) => {
       `SELECT o.*, json_agg(json_build_object(
         'id', oi.id,
         'product_id', oi.product_id,
+        'name', oi.snapshot->>'name',
         'quantity', oi.quantity,
-        'price', oi.price
+        'price', oi.price,
+        'originalPrice', (oi.snapshot->>'originalPrice')::numeric,
+        'discountPercent', (oi.snapshot->>'discountPercent')::numeric
       )) as items
       FROM orders o
       LEFT JOIN order_items oi ON o.id = oi.order_id
@@ -62,13 +68,14 @@ router.get('/user/:userId', async (req: Request, res: Response) => {
       `SELECT o.*, json_agg(json_build_object(
         'id', oi.id,
         'product_id', oi.product_id,
-        'name', p.name,
+        'name', oi.snapshot->>'name',
         'quantity', oi.quantity,
-        'price', oi.price
+        'price', oi.price,
+        'originalPrice', (oi.snapshot->>'originalPrice')::numeric,
+        'discountPercent', (oi.snapshot->>'discountPercent')::numeric
       )) as items
       FROM orders o
       LEFT JOIN order_items oi ON o.id = oi.order_id
-      LEFT JOIN products p ON p.id = oi.product_id
       WHERE o.user_id = $1
       GROUP BY o.id
       ORDER BY o.created_at DESC`,
@@ -84,72 +91,57 @@ router.get('/user/:userId', async (req: Request, res: Response) => {
 // POST /api/orders - Create order
 router.post('/', async (req: Request, res: Response) => {
   const client = await pool.connect();
-  
+
   try {
     const { userId, addressId, items, notes, trackingData } = req.body;
-    
+    const shippingCost = Number(req.body.shippingCost || 0);
+    const pointsDiscount = Number(req.body.pointsDiscount || 0);
+
     if (!items || items.length === 0) {
       return res.status(400).json({ error: 'Order must have at least one item' });
     }
-    
+
     await client.query('BEGIN');
-    
-    // Calculate total
-    let total = 0;
-    for (const item of items) {
-      const productResult = await client.query(
-        'SELECT price FROM products WHERE id = $1',
-        [item.productId]
-      );
-      if (productResult.rows.length > 0) {
-        total += Number(productResult.rows[0].price) * item.quantity;
-      }
-    }
-    
-    // Create order
+
+    const itemsTotal = items.reduce((sum: number, item: any) => sum + Number(item.price || 0) * item.quantity, 0);
+    const total = itemsTotal + shippingCost - pointsDiscount;
+
     const orderResult = await client.query(
-      `INSERT INTO orders (user_id, address_id, total, notes, tracking_data)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO orders (user_id, address_id, total, notes, tracking_data, shipping_cost, points_discount)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [userId, addressId, total, notes, trackingData ? JSON.stringify(trackingData) : null]
+      [userId, addressId, total, notes, trackingData ? JSON.stringify(trackingData) : null, shippingCost, pointsDiscount]
     );
-    
+
     const order = orderResult.rows[0];
-    
-    // Create order items
+
     for (const item of items) {
-      const productResult = await client.query(
-        'SELECT price FROM products WHERE id = $1',
-        [item.productId]
+      const snapshot = {
+        name: item.name || '',
+        originalPrice: Number(item.originalPrice || item.price || 0),
+        discountPercent: Number(item.discountPercent || 0),
+        price: Number(item.price || 0),
+      };
+      await client.query(
+        `INSERT INTO order_items (order_id, product_id, quantity, price, snapshot)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [order.id, item.productId, item.quantity, Number(item.price || 0), snapshot]
       );
-      
-      if (productResult.rows.length > 0) {
-        await client.query(
-          `INSERT INTO order_items (order_id, product_id, quantity, price)
-           VALUES ($1, $2, $3, $4)`,
-          [order.id, item.productId, item.quantity, productResult.rows[0].price]
-        );
-      }
     }
-    
+
     await client.query('COMMIT');
-    
-    // Fetch complete order with items
-    const completeOrder = await pool.query(
-      `SELECT o.*, json_agg(json_build_object(
-        'id', oi.id,
-        'product_id', oi.product_id,
-        'quantity', oi.quantity,
-        'price', oi.price
-      )) as items
-      FROM orders o
-      LEFT JOIN order_items oi ON o.id = oi.order_id
-      WHERE o.id = $1
-      GROUP BY o.id`,
+
+    const fullOrderResult = await client.query(
+      `SELECT o.*, od.items, od.tracking FROM orders o
+       LEFT JOIN LATERAL jsonb_build_object(
+         'items', (SELECT jsonb_agg(jsonb_build_object('id', oi.id, 'productId', oi.product_id, 'quantity', oi.quantity, 'price', oi.price, 'originalPrice', (oi.snapshot->>'originalPrice')::numeric, 'discountPercent', (oi.snapshot->>'discountPercent')::numeric)) FROM order_items oi WHERE oi.order_id = o.id),
+         'tracking', o.tracking_data
+       ) od ON true
+       WHERE o.id = $1`,
       [order.id]
     );
-    
-    res.status(201).json(completeOrder.rows[0]);
+
+    res.status(201).json(fullOrderResult.rows[0]);
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Error creating order:', error);

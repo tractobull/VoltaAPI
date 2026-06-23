@@ -60,6 +60,10 @@ router.get('/search', async (req: Request, res: Response) => {
         id: product.id,
         name: product.name,
         price: Number(product.price),
+        discountedPrice: product.discount_percent > 0 
+          ? Math.round(Number(product.price) * (1 - Number(product.discount_percent) / 100) * 100) / 100 
+          : Number(product.price),
+        discountPercent: Number(product.discount_percent) || 0,
         image: product.image,
         available: product.available,
         description: product.description,
@@ -153,7 +157,11 @@ router.get('/', async (req: Request, res: Response) => {
         return {
           id: product.id,
           name: product.name,
-          price: product.price,
+          price: Number(product.price),
+          discountedPrice: product.discount_percent > 0 
+            ? Math.round(Number(product.price) * (1 - Number(product.discount_percent) / 100) * 100) / 100 
+            : Number(product.price),
+          discountPercent: Number(product.discount_percent) || 0,
           image: product.image,
           available: product.available,
           description: product.description,
@@ -170,6 +178,51 @@ router.get('/', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error fetching products:', error);
     res.status(500).json({ error: 'Error fetching products' });
+  }
+});
+
+// GET /api/products/featured - Get featured products for home banner
+router.get('/featured', async (_req: Request, res: Response) => {
+  try {
+    const discountedResult = await pool.query(
+      `SELECT p.*, b.name as brand_name 
+       FROM products p 
+       JOIN brands b ON p.brand_id = b.id 
+       WHERE p.discount_percent > 0 AND p.available = true 
+       ORDER BY p.discount_percent DESC 
+       LIMIT 3`
+    );
+
+    const popularResult = await pool.query(
+      `SELECT p.*, b.name as brand_name 
+       FROM products p 
+       JOIN brands b ON p.brand_id = b.id 
+       WHERE p.available = true 
+       ORDER BY p.price DESC 
+       LIMIT 6`
+    );
+
+    const mapProduct = (p: any) => ({
+      id: p.id,
+      name: p.name,
+      price: Number(p.price),
+      discountedPrice: p.discount_percent > 0 
+        ? Math.round(Number(p.price) * (1 - Number(p.discount_percent) / 100) * 100) / 100 
+        : Number(p.price),
+      discountPercent: Number(p.discount_percent) || 0,
+      image: p.image,
+      available: p.available,
+      brand: p.brand_name,
+      categoryId: p.category_id,
+    });
+
+    res.json({
+      discounted: discountedResult.rows.map(mapProduct),
+      popular: popularResult.rows.map(mapProduct),
+    });
+  } catch (error) {
+    console.error('Error fetching featured products:', error);
+    res.status(500).json({ error: 'Error fetching featured products' });
   }
 });
 
@@ -201,7 +254,11 @@ router.get('/:id', async (req: Request, res: Response) => {
     res.json({
       id: product.id,
       name: product.name,
-      price: product.price,
+      price: Number(product.price),
+      discountedPrice: product.discount_percent > 0 
+        ? Math.round(Number(product.price) * (1 - Number(product.discount_percent) / 100) * 100) / 100 
+        : Number(product.price),
+      discountPercent: Number(product.discount_percent) || 0,
       image: product.image,
       available: product.available,
       description: product.description,
@@ -220,13 +277,25 @@ router.get('/:id', async (req: Request, res: Response) => {
 // POST /api/products - Create product
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { id, name, brandId, categoryId, price, image, available, description, vehicles } = req.body;
+    const { id, name, brandId, categoryId, price, image, available, description, vehicles, discountPercent } = req.body;
+
+    const columns = ['name', 'brand_id', 'category_id', 'price', 'image', 'available', 'description', 'discount_percent'];
+    const values = [name, brandId, categoryId, price, image, available ?? true, description, discountPercent ?? 0];
+    const placeholders = ['$1', '$2', '$3', '$4', '$5', '$6', '$7', '$8'];
+
+    if (id) {
+      columns.unshift('id');
+      values.unshift(id);
+      placeholders.unshift('$1');
+      placeholders.shift();
+      for (let i = 0; i < values.length; i++) placeholders[i] = `$${i + 1}`;
+    }
 
     const result = await pool.query(
-      `INSERT INTO products (id, name, brand_id, category_id, price, image, available, description)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO products (${columns.join(', ')})
+       VALUES (${placeholders.join(', ')})
        RETURNING *`,
-      [id, name, brandId, categoryId, price, image, available ?? true, description]
+      values
     );
 
     // Insert vehicle compatibility if provided
@@ -259,7 +328,7 @@ router.post('/', async (req: Request, res: Response) => {
 router.put('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, brandId, categoryId, price, image, available, description } = req.body;
+    const { name, brandId, categoryId, price, image, available, description, discountPercent } = req.body;
 
     const result = await pool.query(
       `UPDATE products 
@@ -270,10 +339,11 @@ router.put('/:id', async (req: Request, res: Response) => {
            image = COALESCE($5, image),
            available = COALESCE($6, available),
            description = COALESCE($7, description),
+           discount_percent = COALESCE($8, discount_percent),
            updated_at = NOW()
-       WHERE id = $8
+       WHERE id = $9
        RETURNING *`,
-      [name, brandId, categoryId, price, image, available, description, id]
+      [name, brandId, categoryId, price, image, available, description, discountPercent, id]
     );
 
     if (result.rows.length === 0) {

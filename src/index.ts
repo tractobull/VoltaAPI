@@ -11,6 +11,7 @@ import categoryRoutes from './routes/categories';
 import brandRoutes from './routes/brands';
 import orderRoutes from './routes/orders';
 import paymentRoutes from './routes/payments';
+import promotionRoutes from './routes/promotions';
 
 // Initialize
 const app = express();
@@ -28,6 +29,7 @@ app.use('/api/categories', categoryRoutes);
 app.use('/api/brands', brandRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/promotions', promotionRoutes);
 
 // Health check
 app.get('/health', async (req, res) => {

@@ -25,7 +25,6 @@ const brands = [
 
 const products = [
   {
-    id: 'alt-24v',
     name: 'Alternador 24V 100A',
     brandId: 'delco',
     categoryId: 'electrical',
@@ -34,7 +33,6 @@ const products = [
     available: true,
   },
   {
-    id: 'brake-pads',
     name: 'Pastillas de freno',
     brandId: 'meritor',
     categoryId: 'brakes',
@@ -43,7 +41,6 @@ const products = [
     available: false,
   },
   {
-    id: 'oil-filter',
     name: 'Filtro de aceite LF16015',
     brandId: 'fleetguard',
     categoryId: 'filters',
@@ -52,7 +49,6 @@ const products = [
     available: true,
   },
   {
-    id: 'headlight',
     name: 'Faro delantero izquierdo',
     brandId: 'depo',
     categoryId: 'electrical',
@@ -61,7 +57,6 @@ const products = [
     available: true,
   },
   {
-    id: 'suspension-kit',
     name: 'Kit de suspensión neumática',
     brandId: 'wabco',
     categoryId: 'suspension',
@@ -70,7 +65,6 @@ const products = [
     available: true,
   },
   {
-    id: 'engine-block',
     name: 'Block de motor 6 cilindros',
     brandId: 'cummins',
     categoryId: 'engine',
@@ -79,7 +73,6 @@ const products = [
     available: true,
   },
   {
-    id: 'turbo-charger',
     name: 'Turbo cargador T4',
     brandId: 'borgwarner',
     categoryId: 'engine',
@@ -88,7 +81,6 @@ const products = [
     available: true,
   },
   {
-    id: 'injector-kit',
     name: 'Kit de inyectores diésel',
     brandId: 'delco',
     categoryId: 'engine',
@@ -97,7 +89,6 @@ const products = [
     available: true,
   },
   {
-    id: 'clutch-plate',
     name: 'Disco de embrague',
     brandId: 'eaton',
     categoryId: 'transmission',
@@ -106,7 +97,6 @@ const products = [
     available: true,
   },
   {
-    id: 'gearbox-oil',
     name: 'Aceite de caja 75W-90',
     brandId: 'eaton',
     categoryId: 'transmission',
@@ -115,7 +105,6 @@ const products = [
     available: true,
   },
   {
-    id: 'brake-drum',
     name: 'Tambor de freno',
     brandId: 'bendix',
     categoryId: 'brakes',
@@ -124,7 +113,6 @@ const products = [
     available: true,
   },
   {
-    id: 'brake-hose',
     name: 'Manguera de freno reforzada',
     brandId: 'bendix',
     categoryId: 'brakes',
@@ -133,7 +121,6 @@ const products = [
     available: true,
   },
   {
-    id: 'shock-absorber',
     name: 'Amortiguador neumático',
     brandId: 'wabco',
     categoryId: 'suspension',
@@ -142,7 +129,6 @@ const products = [
     available: true,
   },
   {
-    id: 'air-filter',
     name: 'Filtro de aire CA1054',
     brandId: 'fleetguard',
     categoryId: 'filters',
@@ -151,7 +137,6 @@ const products = [
     available: true,
   },
   {
-    id: 'fuel-filter',
     name: 'Filtro de combustible FF5052',
     brandId: 'fleetguard',
     categoryId: 'filters',
@@ -160,7 +145,6 @@ const products = [
     available: true,
   },
   {
-    id: 'battery-12v',
     name: 'Batería 12V 200Ah AGM',
     brandId: 'epcom',
     categoryId: 'electrical',
@@ -169,7 +153,6 @@ const products = [
     available: true,
   },
   {
-    id: 'starter-motor',
     name: 'Marcha de arranque 24V',
     brandId: 'delco',
     categoryId: 'electrical',
@@ -205,10 +188,10 @@ async function seed() {
     console.log('📦 Inserting products...');
     for (const product of products) {
       await pool.query(
-        `INSERT INTO products (id, name, brand_id, category_id, price, image, available) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7) 
+        `INSERT INTO products (name, brand_id, category_id, price, image, available) 
+         VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (id) DO NOTHING`,
-        [product.id, product.name, product.brandId, product.categoryId, product.price, product.image, product.available]
+        [product.name, product.brandId, product.categoryId, product.price, product.image, product.available]
       );
     }
     

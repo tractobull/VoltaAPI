@@ -1,11 +1,32 @@
--- Volta API Database Schema
+-- ==========================================
+-- VOLTA DATABASE SCHEMA v2 (UUID PRODUCTS)
+-- ==========================================
 
--- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- ==================== USUARIOS ====================
+-- ==================== ENUMS ====================
 
-CREATE TYPE user_role AS ENUM ('CUSTOMER', 'ADMIN', 'SUPPORT');
+CREATE TYPE user_role AS ENUM (
+    'CUSTOMER',
+    'ADMIN',
+    'SUPPORT'
+);
+
+CREATE TYPE promotion_type AS ENUM (
+    'product',
+    'info',
+    'image'
+);
+
+CREATE TYPE order_status AS ENUM (
+    'PENDING',
+    'CONFIRMED',
+    'SHIPPED',
+    'DELIVERED',
+    'CANCELLED'
+);
+
+-- ==================== USERS ====================
 
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -15,17 +36,19 @@ CREATE TABLE users (
     password VARCHAR(255) NOT NULL,
     role user_role DEFAULT 'CUSTOMER',
     points INTEGER DEFAULT 0,
+    stripe_customer_id VARCHAR(255) UNIQUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    stripe_customer_id VARCHAR(255) UNIQUE
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- ==================== DIRECCIONES ====================
+-- ==================== ADDRESSES ====================
 
 CREATE TABLE addresses (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    label VARCHAR(50) NOT NULL, -- "Casa", "Trabajo", "Almacén"
+
+    label VARCHAR(50) NOT NULL,
+
     street VARCHAR(255) NOT NULL,
     number VARCHAR(20) DEFAULT '',
     colony VARCHAR(100) DEFAULT '',
@@ -33,30 +56,36 @@ CREATE TABLE addresses (
     state VARCHAR(100) NOT NULL,
     zip_code VARCHAR(10),
     country VARCHAR(2) DEFAULT 'MX',
+
     is_default BOOLEAN DEFAULT FALSE,
     reference_notes TEXT DEFAULT '',
+
     latitude DOUBLE PRECISION,
     longitude DOUBLE PRECISION,
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- ==================== VEHÍCULOS ====================
+-- ==================== VEHICLES ====================
 
 CREATE TABLE vehicles (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    brand VARCHAR(100) NOT NULL, -- Freightliner, Kenworth, Peterbilt
-    model VARCHAR(100) NOT NULL, -- Cascadia, T680, 579
+
+    brand VARCHAR(100) NOT NULL,
+    model VARCHAR(100) NOT NULL,
     year INTEGER NOT NULL,
-    engine VARCHAR(50), -- DD13, DD15, ISX15
+    engine VARCHAR(50),
+
     plate VARCHAR(20),
     vin VARCHAR(17),
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- ==================== CATEGORÍAS ====================
+-- ==================== CATEGORIES ====================
 
 CREATE TABLE categories (
     id VARCHAR(50) PRIMARY KEY,
@@ -64,90 +93,202 @@ CREATE TABLE categories (
     icon VARCHAR(50)
 );
 
--- ==================== MARCAS ====================
+-- ==================== BRANDS ====================
 
 CREATE TABLE brands (
     id VARCHAR(50) PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
-    logo VARCHAR(255)
+    logo VARCHAR(500)
 );
 
--- ==================== PRODUCTOS ====================
+-- ==================== PRODUCTS ====================
 
 CREATE TABLE products (
-    id VARCHAR(50) PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+
     name VARCHAR(255) NOT NULL,
-    brand_id VARCHAR(50) NOT NULL REFERENCES brands(id),
-    category_id VARCHAR(50) NOT NULL REFERENCES categories(id),
-    price DECIMAL(10, 2) NOT NULL,
+
+    brand_id VARCHAR(50) NOT NULL
+        REFERENCES brands(id),
+
+    category_id VARCHAR(50) NOT NULL
+        REFERENCES categories(id),
+
+    price DECIMAL(10,2) NOT NULL,
+
     image VARCHAR(500),
+
     available BOOLEAN DEFAULT TRUE,
+
     description TEXT,
+
+    discount_percent DECIMAL(5,2) DEFAULT 0,
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- ==================== COMPATIBILIDAD VEHÍCULOS ====================
+-- ==================== PROMOTIONS ====================
+
+CREATE TABLE promotions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+
+    type promotion_type NOT NULL,
+
+    eyebrow VARCHAR(50) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    subtitle TEXT,
+
+    link VARCHAR(255),
+
+    image VARCHAR(500),
+    icon VARCHAR(50),
+
+    product_id UUID
+        REFERENCES products(id),
+
+    ai_search BOOLEAN DEFAULT FALSE,
+
+    sort_order INTEGER DEFAULT 0,
+
+    active BOOLEAN DEFAULT TRUE,
+
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- ==================== VEHICLE COMPATIBILITY ====================
 
 CREATE TABLE vehicle_compatibility (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    product_id VARCHAR(50) NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-    brands TEXT[], -- ["Freightliner", "Kenworth"]
-    models JSONB, -- [{brand: "Freightliner", models: ["Cascadia"]}]
+
+    product_id UUID NOT NULL
+        REFERENCES products(id)
+        ON DELETE CASCADE,
+
+    brands TEXT[],
+
+    models JSONB,
+
     year_start INTEGER,
     year_end INTEGER,
-    engines TEXT[], -- ["DD13", "DD15"]
+
+    engines TEXT[],
+
     oem_numbers TEXT[]
 );
 
--- ==================== PEDIDOS ====================
-
-CREATE TYPE order_status AS ENUM ('PENDING', 'CONFIRMED', 'SHIPPED', 'DELIVERED', 'CANCELLED');
+-- ==================== ORDERS ====================
 
 CREATE TABLE orders (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES users(id),
-    address_id UUID REFERENCES addresses(id),
+
+    user_id UUID NOT NULL
+        REFERENCES users(id),
+
+    address_id UUID
+        REFERENCES addresses(id),
+
     status order_status DEFAULT 'PENDING',
-    total DECIMAL(10, 2) NOT NULL,
+
+    total DECIMAL(10,2) NOT NULL,
+
     notes TEXT,
+
+    tracking_data JSONB,
+
+    shipping_cost DECIMAL(10,2) DEFAULT 0,
+
+    points_discount DECIMAL(10,2) DEFAULT 0,
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- ==================== ORDER ITEMS ====================
 
 CREATE TABLE order_items (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-    product_id VARCHAR(50) NOT NULL REFERENCES products(id),
-    quantity INTEGER NOT NULL,
-    price DECIMAL(10, 2) NOT NULL -- Precio al momento de la compra
+
+    order_id UUID NOT NULL
+        REFERENCES orders(id)
+        ON DELETE CASCADE,
+
+    product_id UUID NOT NULL
+        REFERENCES products(id),
+
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+
+    price DECIMAL(10,2) NOT NULL,
+
+    snapshot JSONB
 );
 
--- ==================== CHAT / CONVERSACIONES ====================
+-- ==================== CHAT SESSIONS ====================
 
 CREATE TABLE chat_sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES users(id),
+
+    user_id UUID
+        REFERENCES users(id),
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- ==================== CHAT MESSAGES ====================
+
 CREATE TABLE chat_messages (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    session_id UUID NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
-    role VARCHAR(20) NOT NULL, -- "user", "assistant", "system"
+
+    session_id UUID NOT NULL
+        REFERENCES chat_sessions(id)
+        ON DELETE CASCADE,
+
+    role VARCHAR(20) NOT NULL,
+
     content TEXT NOT NULL,
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- ==================== ÍNDICES ====================
+-- ==================== INDEXES ====================
 
-CREATE INDEX idx_products_category ON products(category_id);
-CREATE INDEX idx_products_brand ON products(brand_id);
-CREATE INDEX idx_products_available ON products(available);
-CREATE INDEX idx_addresses_user ON addresses(user_id);
-CREATE INDEX idx_vehicles_user ON vehicles(user_id);
-CREATE INDEX idx_orders_user ON orders(user_id);
-CREATE INDEX idx_orders_status ON orders(status);
-CREATE INDEX idx_chat_messages_session ON chat_messages(session_id);
-CREATE INDEX idx_vehicle_compatibility_product ON vehicle_compatibility(product_id);
+CREATE INDEX idx_products_category
+    ON products(category_id);
+
+CREATE INDEX idx_products_brand
+    ON products(brand_id);
+
+CREATE INDEX idx_products_available
+    ON products(available);
+
+CREATE INDEX idx_addresses_user
+    ON addresses(user_id);
+
+CREATE INDEX idx_vehicles_user
+    ON vehicles(user_id);
+
+CREATE INDEX idx_orders_user
+    ON orders(user_id);
+
+CREATE INDEX idx_orders_status
+    ON orders(status);
+
+CREATE INDEX idx_chat_messages_session
+    ON chat_messages(session_id);
+
+CREATE INDEX idx_vehicle_compatibility_product
+    ON vehicle_compatibility(product_id);
+
+CREATE INDEX idx_order_items_order
+    ON order_items(order_id);
+
+CREATE INDEX idx_order_items_product
+    ON order_items(product_id);
+
+CREATE INDEX idx_promotions_active
+    ON promotions(active);
+
+CREATE INDEX idx_promotions_sort_order
+    ON promotions(sort_order);
