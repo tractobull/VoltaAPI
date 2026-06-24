@@ -1,17 +1,17 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import pool from './db/pool';
+import pool from './db/pool.js';
 
 // Routes
-import productRoutes from './routes/products';
-import chatRoutes from './routes/chat';
-import userRoutes from './routes/users';
-import categoryRoutes from './routes/categories';
-import brandRoutes from './routes/brands';
-import orderRoutes from './routes/orders';
-import paymentRoutes from './routes/payments';
-import promotionRoutes from './routes/promotions';
+import productRoutes from './routes/products.js';
+import chatRoutes from './routes/chat.js';
+import userRoutes from './routes/users.js';
+import categoryRoutes from './routes/categories.js';
+import brandRoutes from './routes/brands.js';
+import orderRoutes from './routes/orders.js';
+import paymentRoutes from './routes/payments.js';
+import promotionRoutes from './routes/promotions.js';
 
 // Initialize
 const app = express();
@@ -50,7 +50,7 @@ app.get('/health', async (req, res) => {
 });
 
 // Error handling
-app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
+app.use((err, req, res, next) => {
   console.error('Error:', err.message);
   res.status(500).json({ error: 'Internal server error' });
 });

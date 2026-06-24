@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import pool from './pool';
+import pool from './pool.js';
 
 const categories = [
   { id: 'engine', name: 'Motor', icon: 'settings' },

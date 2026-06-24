@@ -1,28 +1,9 @@
-import pool from '../db/pool';
-
-interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-}
-
-interface GroqResponse {
-  id: string;
-  choices: {
-    index: number;
-    message: { role: string; content: string };
-    finish_reason: string;
-  }[];
-  usage?: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-  };
-}
+import pool from '../db/pool.js';
 
 export class ChatService {
-  private apiUrl: string;
-  private apiKey: string;
-  private model: string;
+  apiUrl;
+  apiKey;
+  model;
 
   constructor() {
     this.apiUrl = process.env.GROQ_API_URL || 'https://api.groq.com/openai/v1/chat/completions';
@@ -30,7 +11,7 @@ export class ChatService {
     this.model = process.env.GROQ_MODEL || 'llama-3.1-8b-instant';
   }
 
-  private async buildProductCatalog(): Promise<string> {
+  async buildProductCatalog() {
     const result = await pool.query(`
       SELECT p.id, p.name, p.price, p.available, 
              b.name as brand_name, c.name as category_name,
@@ -52,7 +33,7 @@ export class ChatService {
     }).join('\n');
   }
 
-  private async buildSystemPrompt(): Promise<string> {
+  async buildSystemPrompt() {
     const catalog = await this.buildProductCatalog();
 
     return `Eres Volta, el asistente de Tracto Bull Store, tienda de piezas para camiones pesados en Guadalajara, México.
@@ -139,10 +120,7 @@ ${catalog}
 IMPORTANTE: El catálogo de arriba es TU ÚNICA fuente de información. Si algo no está ahí, no existe para ti.`;
   }
 
-  async sendMessage(
-    messages: ChatMessage[],
-    sessionId?: string
-  ): Promise<{ content: string; sessionId: string }> {
+  async sendMessage(messages, sessionId) {
     // Create or get session
     let sessionResult;
     if (sessionId) {
@@ -171,7 +149,7 @@ IMPORTANTE: El catálogo de arriba es TU ÚNICA fuente de información. Si algo 
 
     // Build messages with system prompt
     const systemPrompt = await this.buildSystemPrompt();
-    const chatMessages: ChatMessage[] = [
+    const chatMessages = [
       { role: 'system', content: systemPrompt },
       ...messages,
     ];
@@ -196,7 +174,7 @@ IMPORTANTE: El catálogo de arriba es TU ÚNICA fuente de información. Si algo 
       throw new Error(`Groq API error: ${response.status} - ${errorText}`);
     }
 
-    const data = await response.json() as GroqResponse;
+    const data = await response.json();
     const content = data.choices?.[0]?.message?.content || 'No pude generar una respuesta.';
 
     // Save assistant message
@@ -208,14 +186,14 @@ IMPORTANTE: El catálogo de arriba es TU ÚNICA fuente de información. Si algo 
     return { content, sessionId: currentSessionId };
   }
 
-  async getSessionMessages(sessionId: string): Promise<ChatMessage[]> {
+  async getSessionMessages(sessionId) {
     const result = await pool.query(
       'SELECT role, content FROM chat_messages WHERE session_id = $1 ORDER BY created_at ASC',
       [sessionId]
     );
 
     return result.rows.map(m => ({
-      role: m.role as 'system' | 'user' | 'assistant',
+      role: m.role,
       content: m.content,
     }));
   }

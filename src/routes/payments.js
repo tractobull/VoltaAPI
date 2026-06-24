@@ -1,12 +1,12 @@
-import { Router, Request, Response } from 'express';
+import { Router } from 'express';
 import Stripe from 'stripe';
-import pool from '../db/pool';
+import pool from '../db/pool.js';
 
-async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+async function withRetry(fn, maxRetries = 3) {
   for (let i = 0; i < maxRetries; i++) {
     try {
       return await fn();
-    } catch (error: any) {
+    } catch (error) {
       if (error?.type === 'StripeRateLimitError' && i < maxRetries - 1) {
         const delay = Math.pow(2, i) * 1000;
         await new Promise((resolve) => setTimeout(resolve, delay));
@@ -24,7 +24,7 @@ const router = Router();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '')
 
 // POST /api/payments/customer - Create or get Stripe customer for user
-router.post('/customer', async (req: Request, res: Response) => {
+router.post('/customer', async (req, res) => {
   try {
     const { userId, email, name } = req.body;
 
@@ -54,7 +54,7 @@ router.post('/customer', async (req: Request, res: Response) => {
     );
 
     res.json({ customerId: customer.id });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error creating Stripe customer:', error);
     if (error?.type === 'StripeRateLimitError') {
       return res.status(429).json({ error: 'Rate limit exceeded. Please try again later.' });
@@ -64,7 +64,7 @@ router.post('/customer', async (req: Request, res: Response) => {
 });
 
 // POST /api/payments/setup-intent - Create SetupIntent to save a card
-router.post('/setup-intent', async (req: Request, res: Response) => {
+router.post('/setup-intent', async (req, res) => {
   try {
     const { customerId } = req.body;
 
@@ -79,7 +79,7 @@ router.post('/setup-intent', async (req: Request, res: Response) => {
     );
 
     res.json({ clientSecret: setupIntent.client_secret });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error creating SetupIntent:', error);
     if (error?.type === 'StripeRateLimitError') {
       return res.status(429).json({ error: 'Rate limit exceeded. Please try again later.' });
@@ -89,9 +89,9 @@ router.post('/setup-intent', async (req: Request, res: Response) => {
 });
 
 // GET /api/payments/methods/:customerId - List saved payment methods
-router.get('/methods/:customerId', async (req: Request, res: Response) => {
+router.get('/methods/:customerId', async (req, res) => {
   try {
-    const customerId = req.params.customerId as string;
+    const customerId = req.params.customerId;
 
     const paymentMethods = await withRetry(() =>
       stripe.paymentMethods.list({
@@ -102,7 +102,7 @@ router.get('/methods/:customerId', async (req: Request, res: Response) => {
 
     // Get the default payment method for this customer
     const customer = await stripe.customers.retrieve(customerId);
-    const defaultPaymentMethodId = (customer as any).invoice_settings?.default_payment_method;
+    const defaultPaymentMethodId = customer.invoice_settings?.default_payment_method;
 
     const methods = paymentMethods.data.map((pm) => ({
       id: pm.id,
@@ -114,7 +114,7 @@ router.get('/methods/:customerId', async (req: Request, res: Response) => {
     }));
 
     res.json(methods);
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error listing payment methods:', error);
     if (error?.type === 'StripeRateLimitError') {
       return res.status(429).json({ error: 'Rate limit exceeded. Please try again later.' });
@@ -124,7 +124,7 @@ router.get('/methods/:customerId', async (req: Request, res: Response) => {
 });
 
 // POST /api/payments/set-default - Set default payment method
-router.post('/set-default', async (req: Request, res: Response) => {
+router.post('/set-default', async (req, res) => {
   try {
     const { customerId, paymentMethodId } = req.body;
 
@@ -137,7 +137,7 @@ router.post('/set-default', async (req: Request, res: Response) => {
     );
 
     res.json({ success: true });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error setting default payment method:', error);
     if (error?.type === 'StripeRateLimitError') {
       return res.status(429).json({ error: 'Rate limit exceeded. Please try again later.' });
@@ -147,9 +147,9 @@ router.post('/set-default', async (req: Request, res: Response) => {
 });
 
 // DELETE /api/payments/methods/:paymentMethodId - Detach (delete) a payment method
-router.delete('/methods/:paymentMethodId', async (req: Request, res: Response) => {
+router.delete('/methods/:paymentMethodId', async (req, res) => {
   try {
-    const paymentMethodId = req.params.paymentMethodId as string;
+    const paymentMethodId = req.params.paymentMethodId;
 
     await stripe.paymentMethods.detach(paymentMethodId);
 
@@ -161,7 +161,7 @@ router.delete('/methods/:paymentMethodId', async (req: Request, res: Response) =
 });
 
 // POST /api/payments/charge - Charge a saved payment method
-router.post('/charge', async (req: Request, res: Response) => {
+router.post('/charge', async (req, res) => {
   try {
     const { customerId, paymentMethodId, amount, currency, orderId } = req.body;
 
@@ -187,7 +187,7 @@ router.post('/charge', async (req: Request, res: Response) => {
       paymentIntentId: paymentIntent.id,
       status: paymentIntent.status,
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error charging payment method:', error);
     res.status(500).json({
       error: error.message || 'Error processing payment',

@@ -1,12 +1,12 @@
-import { Router, Request, Response } from 'express';
-import pool from '../db/pool';
-import { ChatService } from '../services/chatService';
+import { Router } from 'express';
+import pool from '../db/pool.js';
+import { ChatService } from '../services/chatService.js';
 
 const router = Router();
 const chatService = new ChatService();
 
 // GET /api/products/search - Search products with pagination
-router.get('/search', async (req: Request, res: Response) => {
+router.get('/search', async (req, res) => {
   try {
     const { q, category, brand, page, limit } = req.query;
     const pageNum = Math.max(1, Number(page) || 1);
@@ -14,7 +14,7 @@ router.get('/search', async (req: Request, res: Response) => {
     const offset = (pageNum - 1) * limitNum;
     
     let whereClause = 'WHERE 1=1';
-    const params: any[] = [];
+    const params = [];
     let paramIndex = 1;
 
     if (q) {
@@ -91,7 +91,7 @@ router.get('/search', async (req: Request, res: Response) => {
 });
 
 // POST /api/products/ai-search - Search products using AI
-router.post('/ai-search', async (req: Request, res: Response) => {
+router.post('/ai-search', async (req, res) => {
   try {
     const { query } = req.body;
 
@@ -111,7 +111,7 @@ router.post('/ai-search', async (req: Request, res: Response) => {
 });
 
 // GET /api/products - Get all products
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', async (req, res) => {
   try {
     const { category, brand, search, available } = req.query;
     
@@ -123,7 +123,7 @@ router.get('/', async (req: Request, res: Response) => {
       JOIN categories c ON p.category_id = c.id
       WHERE 1=1
     `;
-    const params: any[] = [];
+    const params = [];
     let paramIndex = 1;
 
     if (category) {
@@ -182,7 +182,7 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // GET /api/products/featured - Get featured products for home banner
-router.get('/featured', async (_req: Request, res: Response) => {
+router.get('/featured', async (_req, res) => {
   try {
     const discountedResult = await pool.query(
       `SELECT p.*, b.name as brand_name 
@@ -202,7 +202,7 @@ router.get('/featured', async (_req: Request, res: Response) => {
        LIMIT 6`
     );
 
-    const mapProduct = (p: any) => ({
+    const mapProduct = (p) => ({
       id: p.id,
       name: p.name,
       price: Number(p.price),
@@ -227,7 +227,7 @@ router.get('/featured', async (_req: Request, res: Response) => {
 });
 
 // GET /api/products/:id - Get product by ID
-router.get('/:id', async (req: Request, res: Response) => {
+router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -275,7 +275,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 // POST /api/products - Create product
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', async (req, res) => {
   try {
     const { id, name, brandId, categoryId, price, image, available, description, vehicles, discountPercent } = req.body;
 
@@ -325,7 +325,7 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // PUT /api/products/:id - Update product
-router.put('/:id', async (req: Request, res: Response) => {
+router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { name, brandId, categoryId, price, image, available, description, discountPercent } = req.body;
@@ -358,7 +358,7 @@ router.put('/:id', async (req: Request, res: Response) => {
 });
 
 // DELETE /api/products/:id - Delete product
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
 

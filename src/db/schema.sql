@@ -252,6 +252,16 @@ CREATE TABLE chat_messages (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- ==================== FAVORITES ====================
+
+CREATE TABLE favorites (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(user_id, product_id)
+);
+
 -- ==================== INDEXES ====================
 
 CREATE INDEX idx_products_category
@@ -292,3 +302,9 @@ CREATE INDEX idx_promotions_active
 
 CREATE INDEX idx_promotions_sort_order
     ON promotions(sort_order);
+
+CREATE INDEX idx_favorites_user
+    ON favorites(user_id);
+
+CREATE INDEX idx_favorites_product
+    ON favorites(product_id);

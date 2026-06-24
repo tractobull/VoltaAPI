@@ -1,10 +1,10 @@
-import { Router, Request, Response } from 'express';
-import pool from '../db/pool';
+import { Router } from 'express';
+import pool from '../db/pool.js';
 
 const router = Router();
 
 // GET /api/categories - Get all categories
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM categories ORDER BY name ASC');
     res.json(result.rows);
@@ -15,7 +15,7 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // GET /api/categories/:id - Get category by ID
-router.get('/:id', async (req: Request, res: Response) => {
+router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query('SELECT * FROM categories WHERE id = $1', [id]);
@@ -32,7 +32,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 // POST /api/categories - Create category
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', async (req, res) => {
   try {
     const { id, name, icon } = req.body;
     const result = await pool.query(
@@ -47,7 +47,7 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // PUT /api/categories/:id - Update category
-router.put('/:id', async (req: Request, res: Response) => {
+router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { name, icon } = req.body;
@@ -68,7 +68,7 @@ router.put('/:id', async (req: Request, res: Response) => {
 });
 
 // DELETE /api/categories/:id - Delete category
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     await pool.query('DELETE FROM categories WHERE id = $1', [id]);

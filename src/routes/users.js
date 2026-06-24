@@ -1,11 +1,11 @@
-import { Router, Request, Response } from 'express';
+import { Router } from 'express';
 import bcrypt from 'bcrypt';
-import pool from '../db/pool';
+import pool from '../db/pool.js';
 
 const router = Router();
 
 // GET /api/users - Get all users
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', async (req, res) => {
   try {
     const result = await pool.query(
       'SELECT id, email, name, phone, role, points, created_at, updated_at FROM users ORDER BY created_at DESC'
@@ -18,7 +18,7 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // GET /api/users/:id - Get user by ID
-router.get('/:id', async (req: Request, res: Response) => {
+router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
@@ -38,7 +38,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 // POST /api/users - Create user (Register)
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', async (req, res) => {
   try {
     const { email, name, phone, password, role } = req.body;
     
@@ -71,7 +71,7 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // POST /api/users/login - Login
-router.post('/login', async (req: Request, res: Response) => {
+router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     
@@ -113,7 +113,7 @@ router.post('/login', async (req: Request, res: Response) => {
 });
 
 // PUT /api/users/:id - Update user
-router.put('/:id', async (req: Request, res: Response) => {
+router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { name, phone, role } = req.body;
@@ -141,7 +141,7 @@ router.put('/:id', async (req: Request, res: Response) => {
 });
 
 // DELETE /api/users/:id - Delete user
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     await pool.query('DELETE FROM users WHERE id = $1', [id]);
@@ -155,7 +155,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
 // ==================== USER POINTS ====================
 
 // GET /api/users/:id/points - Get user points
-router.get('/:id/points', async (req: Request, res: Response) => {
+router.get('/:id/points', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
@@ -175,7 +175,7 @@ router.get('/:id/points', async (req: Request, res: Response) => {
 });
 
 // POST /api/users/:id/points - Add points
-router.post('/:id/points', async (req: Request, res: Response) => {
+router.post('/:id/points', async (req, res) => {
   try {
     const { id } = req.params;
     const { points, description } = req.body;
@@ -205,7 +205,7 @@ router.post('/:id/points', async (req: Request, res: Response) => {
 });
 
 // POST /api/users/:id/points/deduct - Deduct points
-router.post('/:id/points/deduct', async (req: Request, res: Response) => {
+router.post('/:id/points/deduct', async (req, res) => {
   try {
     const { id } = req.params;
     const { points, description } = req.body;
@@ -244,7 +244,7 @@ router.post('/:id/points/deduct', async (req: Request, res: Response) => {
 // ==================== USER ADDRESSES ====================
 
 // GET /api/users/:id/addresses - Get user addresses
-router.get('/:id/addresses', async (req: Request, res: Response) => {
+router.get('/:id/addresses', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
@@ -259,7 +259,7 @@ router.get('/:id/addresses', async (req: Request, res: Response) => {
 });
 
 // POST /api/users/:id/addresses - Create address
-router.post('/:id/addresses', async (req: Request, res: Response) => {
+router.post('/:id/addresses', async (req, res) => {
   try {
     const { id } = req.params;
     const { label, street, number, colony, city, state, zipCode, country, isDefault, references, latitude, longitude } = req.body;
@@ -279,7 +279,7 @@ router.post('/:id/addresses', async (req: Request, res: Response) => {
 });
 
 // PUT /api/users/:userId/addresses/:addressId - Update address
-router.put('/:userId/addresses/:addressId', async (req: Request, res: Response) => {
+router.put('/:userId/addresses/:addressId', async (req, res) => {
   try {
     const { userId, addressId } = req.params;
     const { label, street, number, colony, city, state, zipCode, isDefault, references, latitude, longitude } = req.body;
@@ -315,7 +315,7 @@ router.put('/:userId/addresses/:addressId', async (req: Request, res: Response) 
 });
 
 // DELETE /api/users/:userId/addresses/:addressId - Delete address
-router.delete('/:userId/addresses/:addressId', async (req: Request, res: Response) => {
+router.delete('/:userId/addresses/:addressId', async (req, res) => {
   try {
     const { userId, addressId } = req.params;
     
@@ -338,7 +338,7 @@ router.delete('/:userId/addresses/:addressId', async (req: Request, res: Respons
 // ==================== USER VEHICLES ====================
 
 // GET /api/users/:id/vehicles - Get user vehicles
-router.get('/:id/vehicles', async (req: Request, res: Response) => {
+router.get('/:id/vehicles', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
@@ -353,7 +353,7 @@ router.get('/:id/vehicles', async (req: Request, res: Response) => {
 });
 
 // POST /api/users/:id/vehicles - Create vehicle
-router.post('/:id/vehicles', async (req: Request, res: Response) => {
+router.post('/:id/vehicles', async (req, res) => {
   try {
     const { id } = req.params;
     const { brand, model, year, engine, plate, vin } = req.body;
@@ -369,6 +369,62 @@ router.post('/:id/vehicles', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error creating vehicle:', error);
     res.status(500).json({ error: 'Error creating vehicle' });
+  }
+});
+
+// ==================== USER FAVORITES ====================
+
+// GET /api/users/:id/favorites - Get user favorite product IDs
+router.get('/:id/favorites', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      'SELECT product_id FROM favorites WHERE user_id = $1 ORDER BY created_at DESC',
+      [id]
+    );
+    res.json(result.rows.map((r) => r.product_id));
+  } catch (error) {
+    console.error('Error fetching favorites:', error);
+    res.status(500).json({ error: 'Error fetching favorites' });
+  }
+});
+
+// POST /api/users/:id/favorites - Add product to favorites
+router.post('/:id/favorites', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { productId } = req.body;
+    
+    if (!productId) {
+      return res.status(400).json({ error: 'productId is required' });
+    }
+    
+    await pool.query(
+      'INSERT INTO favorites (user_id, product_id) VALUES ($1, $2) ON CONFLICT (user_id, product_id) DO NOTHING',
+      [id, productId]
+    );
+    
+    res.json({ message: 'Added to favorites' });
+  } catch (error) {
+    console.error('Error adding favorite:', error);
+    res.status(500).json({ error: 'Error adding favorite' });
+  }
+});
+
+// DELETE /api/users/:id/favorites/:productId - Remove product from favorites
+router.delete('/:id/favorites/:productId', async (req, res) => {
+  try {
+    const { id, productId } = req.params;
+    
+    await pool.query(
+      'DELETE FROM favorites WHERE user_id = $1 AND product_id = $2',
+      [id, productId]
+    );
+    
+    res.json({ message: 'Removed from favorites' });
+  } catch (error) {
+    console.error('Error removing favorite:', error);
+    res.status(500).json({ error: 'Error removing favorite' });
   }
 });
 

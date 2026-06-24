@@ -1,10 +1,10 @@
-import { Router, Request, Response } from 'express';
-import pool from '../db/pool';
+import { Router } from 'express';
+import pool from '../db/pool.js';
 
 const router = Router();
 
 // GET /api/orders - Get all orders
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT o.*, json_agg(json_build_object(
@@ -29,7 +29,7 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // GET /api/orders/:id - Get order by ID
-router.get('/:id', async (req: Request, res: Response) => {
+router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
@@ -61,7 +61,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 // GET /api/orders/user/:userId - Get orders by user
-router.get('/user/:userId', async (req: Request, res: Response) => {
+router.get('/user/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
     const result = await pool.query(
@@ -89,7 +89,7 @@ router.get('/user/:userId', async (req: Request, res: Response) => {
 });
 
 // POST /api/orders - Create order
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', async (req, res) => {
   const client = await pool.connect();
 
   try {
@@ -103,7 +103,7 @@ router.post('/', async (req: Request, res: Response) => {
 
     await client.query('BEGIN');
 
-    const itemsTotal = items.reduce((sum: number, item: any) => sum + Number(item.price || 0) * item.quantity, 0);
+    const itemsTotal = items.reduce((sum, item) => sum + Number(item.price || 0) * item.quantity, 0);
     const total = itemsTotal + shippingCost - pointsDiscount;
 
     const orderResult = await client.query(
@@ -165,7 +165,7 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // PUT /api/orders/:id - Update order status
-router.put('/:id', async (req: Request, res: Response) => {
+router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;

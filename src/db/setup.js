@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import pool from './pool';
+import pool from './pool.js';
 
 async function setup() {
   console.log('🗄️  Setting up Volta database...');

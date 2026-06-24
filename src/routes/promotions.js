@@ -1,10 +1,10 @@
-import { Router, Request, Response } from 'express';
-import pool from '../db/pool';
+import { Router } from 'express';
+import pool from '../db/pool.js';
 
 const router = Router();
 
 // GET /api/promotions - Get active promotions for hero banner
-router.get('/', async (_req: Request, res: Response) => {
+router.get('/', async (_req, res) => {
   try {
     const result = await pool.query(
       `SELECT p.*, pr.name as product_name, pr.price as product_price, 
@@ -34,6 +34,7 @@ router.get('/', async (_req: Request, res: Response) => {
         const discountedPrice = discount > 0
           ? Math.round(price * (1 - discount / 100) * 100) / 100
           : price;
+        const productImage = row.product_image || row.image;
 
         return {
           ...base,
@@ -41,12 +42,15 @@ router.get('/', async (_req: Request, res: Response) => {
           price,
           discountedPrice,
           discountPercent: discount,
-          image: row.product_image || row.image,
+          image: productImage ? productImage + (row.updated_at ? `${productImage.includes('?') ? '&' : '?'}v=${new Date(row.updated_at).getTime()}` : '') : null,
           brand: row.brand_name,
         };
       }
 
-      return base;
+      return {
+        ...base,
+        image: row.image ? row.image + (row.updated_at ? `${row.image.includes('?') ? '&' : '?'}v=${new Date(row.updated_at).getTime()}` : '') : null,
+      };
     });
 
     res.json(promotions);
@@ -57,7 +61,7 @@ router.get('/', async (_req: Request, res: Response) => {
 });
 
 // POST /api/promotions - Create promotion (admin)
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', async (req, res) => {
   try {
     const { id, type, eyebrow, title, subtitle, link, image, icon, productId, sortOrder } = req.body;
 
@@ -76,7 +80,7 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // PUT /api/promotions/:id - Update promotion (admin)
-router.put('/:id', async (req: Request, res: Response) => {
+router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { type, eyebrow, title, subtitle, link, image, icon, productId, sortOrder, active } = req.body;
@@ -111,7 +115,7 @@ router.put('/:id', async (req: Request, res: Response) => {
 });
 
 // DELETE /api/promotions/:id - Delete promotion (admin)
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query('DELETE FROM promotions WHERE id = $1 RETURNING id', [id]);

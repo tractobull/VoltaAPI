@@ -2,18 +2,17 @@
   "name": "voltaapi",
   "version": "1.0.0",
   "description": "Volta API - Backend for Volta truck parts app",
-  "main": "dist/index.js",
+  "main": "src/index.js",
   "scripts": {
-    "dev": "nodemon --exec ts-node src/index.ts",
-    "build": "tsc",
-    "start": "node dist/index.js",
-    "db:setup": "ts-node src/db/setup.ts",
-    "db:seed": "ts-node src/db/seed.ts"
+    "dev": "nodemon src/index.js",
+    "start": "node src/index.js",
+    "db:setup": "node src/db/setup.js",
+    "db:seed": "node src/db/seed.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "dependencies": {
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",
@@ -24,14 +23,6 @@
     "stripe": "^22.2.2"
   },
   "devDependencies": {
-    "@types/bcrypt": "^6.0.0",
-    "@types/cors": "^2.8.19",
-    "@types/express": "^5.0.6",
-    "@types/jsonwebtoken": "^9.0.10",
-    "@types/node": "^25.9.3",
-    "@types/pg": "^8.20.0",
-    "nodemon": "^3.1.14",
-    "ts-node": "^10.9.2",
-    "typescript": "^6.0.3"
+    "nodemon": "^3.1.14"
   }
 }

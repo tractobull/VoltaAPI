@@ -1,12 +1,12 @@
-import { Router, Request, Response } from 'express';
-import { ChatService } from '../services/chatService';
-import pool from '../db/pool';
+import { Router } from 'express';
+import { ChatService } from '../services/chatService.js';
+import pool from '../db/pool.js';
 
 const router = Router();
 const chatService = new ChatService();
 
 // POST /api/chat - Send message
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', async (req, res) => {
   try {
     const { message, sessionId } = req.body;
 
@@ -14,7 +14,7 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Message is required' });
     }
 
-    const messages = [{ role: 'user' as const, content: message }];
+    const messages = [{ role: 'user', content: message }];
     const result = await chatService.sendMessage(messages, sessionId);
 
     res.json({
@@ -28,9 +28,9 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // GET /api/chat/:sessionId - Get session messages
-router.get('/:sessionId', async (req: Request, res: Response) => {
+router.get('/:sessionId', async (req, res) => {
   try {
-    const sessionId = req.params.sessionId as string;
+    const sessionId = req.params.sessionId;
     const messages = await chatService.getSessionMessages(sessionId);
     res.json({ messages });
   } catch (error) {
@@ -40,9 +40,9 @@ router.get('/:sessionId', async (req: Request, res: Response) => {
 });
 
 // DELETE /api/chat/:sessionId - Delete session
-router.delete('/:sessionId', async (req: Request, res: Response) => {
+router.delete('/:sessionId', async (req, res) => {
   try {
-    const sessionId = req.params.sessionId as string;
+    const sessionId = req.params.sessionId;
     await pool.query('DELETE FROM chat_messages WHERE session_id = $1', [sessionId]);
     await pool.query('DELETE FROM chat_sessions WHERE id = $1', [sessionId]);
     res.json({ message: 'Session deleted' });
@@ -53,7 +53,7 @@ router.delete('/:sessionId', async (req: Request, res: Response) => {
 });
 
 // GET /api/chat/suggested/prompts - Get suggested prompts
-router.get('/suggested/prompts', (req: Request, res: Response) => {
+router.get('/suggested/prompts', (req, res) => {
   const prompts = [
     'Mi camión frena mal, ¿qué necesito?',
     'Filtro de aceite para Freightliner Cascadia',

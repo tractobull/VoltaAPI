@@ -1,10 +1,10 @@
-import { Router, Request, Response } from 'express';
-import pool from '../db/pool';
+import { Router } from 'express';
+import pool from '../db/pool.js';
 
 const router = Router();
 
 // GET /api/brands - Get all brands
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM brands ORDER BY name ASC');
     res.json(result.rows);
@@ -15,7 +15,7 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // GET /api/brands/:id - Get brand by ID
-router.get('/:id', async (req: Request, res: Response) => {
+router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query('SELECT * FROM brands WHERE id = $1', [id]);
@@ -32,7 +32,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 // POST /api/brands - Create brand
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', async (req, res) => {
   try {
     const { id, name, logo } = req.body;
     const result = await pool.query(
@@ -47,7 +47,7 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // PUT /api/brands/:id - Update brand
-router.put('/:id', async (req: Request, res: Response) => {
+router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { name, logo } = req.body;
@@ -68,7 +68,7 @@ router.put('/:id', async (req: Request, res: Response) => {
 });
 
 // DELETE /api/brands/:id - Delete brand
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     await pool.query('DELETE FROM brands WHERE id = $1', [id]);
