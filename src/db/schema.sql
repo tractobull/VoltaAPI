@@ -249,8 +249,36 @@ CREATE TABLE chat_messages (
 
     content TEXT NOT NULL,
 
+    token_count INTEGER,
+
+    is_streaming_complete BOOLEAN DEFAULT true,
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- ==================== CHAT SESSIONS PREVIEW VIEW ====================
+
+CREATE OR REPLACE VIEW chat_sessions_preview AS
+SELECT
+    s.id,
+    COALESCE(
+        (SELECT SUBSTRING(content FROM 1 FOR 50)
+         FROM chat_messages
+         WHERE session_id = s.id
+         ORDER BY created_at ASC
+         LIMIT 1),
+        'Nueva conversación'
+    ) AS title,
+    (SELECT COUNT(*) FROM chat_messages WHERE session_id = s.id) AS message_count,
+    (SELECT MAX(created_at) FROM chat_messages WHERE session_id = s.id) AS last_message_at,
+    (
+        SELECT content
+        FROM chat_messages
+        WHERE session_id = s.id AND role = 'assistant'
+        ORDER BY created_at DESC
+        LIMIT 1
+    ) AS last_assistant_preview
+FROM chat_sessions s;
 
 -- ==================== FAVORITES ====================
 
