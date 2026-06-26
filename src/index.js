@@ -103,7 +103,6 @@ app.get('/api/search', authenticate, async (req, res) => {
 // Dashboard metrics
 app.get('/api/dashboard/metrics', authenticate, async (req, res) => {
   try {
-    console.log('[Dashboard] Fetching metrics for user:', req.user?.id);
     
     const [products, orders, users, revenue] = await Promise.all([
       pool.query('SELECT COUNT(*)::int as count FROM products'),
@@ -126,14 +125,10 @@ app.get('/api/dashboard/metrics', authenticate, async (req, res) => {
       lowStock: lowStock.rows || [],
     };
     
-    console.log('[Dashboard] Metrics fetched successfully:', result);
-    console.log('[Dashboard] Sending response with status:', res.statusCode);
     res.json(result);
-    console.log('[Dashboard] Response sent');
   } catch (error) {
     console.error('[Dashboard] Error fetching metrics:', error);
-    console.error('[Dashboard] Error stack:', error.stack);
-    res.status(500).json({ error: 'Error al obtener metricas', details: error.message, stack: error.stack });
+    res.status(500).json({ error: 'Error al obtener metricas', details: error.message });
   }
 });
 

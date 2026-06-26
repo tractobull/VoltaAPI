@@ -7,7 +7,6 @@ const router = Router();
 // GET /api/orders - Get all orders
 router.get('/', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, res) => {
   try {
-    console.log('[Orders] Fetching all orders for user:', req.user?.id);
     const result = await pool.query(
       `SELECT o.*, u.name as user_name, u.email as user_email, u.phone as user_phone, json_agg(json_build_object(
         'id', oi.id,
@@ -24,7 +23,6 @@ router.get('/', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, res) =>
       GROUP BY o.id, u.name, u.email, u.phone
       ORDER BY o.created_at DESC`
     );
-    console.log('[Orders] Fetched', result.rows.length, 'orders');
     res.json(result.rows);
   } catch (error) {
     console.error('[Orders] Error fetching orders:', error);

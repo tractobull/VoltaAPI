@@ -496,4 +496,44 @@ router.delete('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
   }
 });
 
+// GET /api/products/:id/inventory - Get product inventory across all warehouses
+router.get('/:id/inventory', authenticate, authorize('ADMIN'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `SELECT w.id as warehouse_id, w.name as warehouse_name, w.address,
+              COALESCE(i.stock, 0) as stock
+       FROM warehouses w
+       LEFT JOIN inventory i ON w.id = i.warehouse_id AND i.product_id = $1
+       ORDER BY w.name ASC`,
+      [id]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching product inventory:', error);
+    res.status(500).json({ error: 'Error al obtener el inventario del producto' });
+  }
+});
+
+// PUT /api/products/:id/inventory/:warehouseId - Update product inventory in specific warehouse
+router.put('/:id/inventory/:warehouseId', authenticate, authorize('ADMIN'), async (req, res) => {
+  try {
+    const { id, warehouseId } = req.params;
+    const { stock } = req.body;
+
+    const result = await pool.query(
+      `INSERT INTO inventory (product_id, warehouse_id, stock)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (product_id, warehouse_id)
+       DO UPDATE SET stock = $3, updated_at = NOW()
+       RETURNING *`,
+      [id, warehouseId, stock]
+    );
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating product inventory:', error);
+    res.status(500).json({ error: 'Error al actualizar el inventario del producto' });
+  }
+});
+
 export default router;
