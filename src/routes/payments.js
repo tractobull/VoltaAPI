@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import Stripe from 'stripe';
 import pool from '../db/pool.js';
+import { authenticate } from '../middleware/auth.js';
 
 async function withRetry(fn, maxRetries = 3) {
   for (let i = 0; i < maxRetries; i++) {
@@ -24,7 +25,7 @@ const router = Router();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '')
 
 // POST /api/payments/customer - Create or get Stripe customer for user
-router.post('/customer', async (req, res) => {
+router.post('/customer', authenticate, async (req, res) => {
   try {
     const { userId, email, name } = req.body;
 
@@ -64,7 +65,7 @@ router.post('/customer', async (req, res) => {
 });
 
 // POST /api/payments/setup-intent - Create SetupIntent to save a card
-router.post('/setup-intent', async (req, res) => {
+router.post('/setup-intent', authenticate, async (req, res) => {
   try {
     const { customerId } = req.body;
 
@@ -89,7 +90,7 @@ router.post('/setup-intent', async (req, res) => {
 });
 
 // GET /api/payments/methods/:customerId - List saved payment methods
-router.get('/methods/:customerId', async (req, res) => {
+router.get('/methods/:customerId', authenticate, async (req, res) => {
   try {
     const customerId = req.params.customerId;
 
@@ -124,7 +125,7 @@ router.get('/methods/:customerId', async (req, res) => {
 });
 
 // POST /api/payments/set-default - Set default payment method
-router.post('/set-default', async (req, res) => {
+router.post('/set-default', authenticate, async (req, res) => {
   try {
     const { customerId, paymentMethodId } = req.body;
 
@@ -147,7 +148,7 @@ router.post('/set-default', async (req, res) => {
 });
 
 // DELETE /api/payments/methods/:paymentMethodId - Detach (delete) a payment method
-router.delete('/methods/:paymentMethodId', async (req, res) => {
+router.delete('/methods/:paymentMethodId', authenticate, async (req, res) => {
   try {
     const paymentMethodId = req.params.paymentMethodId;
 
@@ -161,7 +162,7 @@ router.delete('/methods/:paymentMethodId', async (req, res) => {
 });
 
 // POST /api/payments/charge - Charge a saved payment method
-router.post('/charge', async (req, res) => {
+router.post('/charge', authenticate, async (req, res) => {
   try {
     const { customerId, paymentMethodId, amount, currency, orderId } = req.body;
 

@@ -189,6 +189,9 @@ CREATE TABLE orders (
     address_id UUID
         REFERENCES addresses(id),
 
+    warehouse_id UUID
+        REFERENCES warehouses(id),
+
     status order_status DEFAULT 'PENDING',
 
     total DECIMAL(10,2) NOT NULL,
@@ -290,6 +293,45 @@ CREATE TABLE favorites (
     UNIQUE(user_id, product_id)
 );
 
+-- ================== NOTIFICATIONS ==================
+
+CREATE TABLE notifications (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type VARCHAR(50) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL,
+    icon VARCHAR(50) DEFAULT 'bell',
+    read BOOLEAN DEFAULT FALSE,
+    data JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Warehouses (CEDIS) table
+CREATE TABLE IF NOT EXISTS warehouses (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(255) NOT NULL,
+    address TEXT NOT NULL,
+    lat DOUBLE PRECISION,
+    lng DOUBLE PRECISION,
+    phone VARCHAR(20),
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Inventory: stock per product per warehouse
+CREATE TABLE IF NOT EXISTS inventory (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    warehouse_id UUID NOT NULL REFERENCES warehouses(id) ON DELETE CASCADE,
+    stock INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(product_id, warehouse_id)
+);
+
+
 -- ==================== INDEXES ====================
 
 CREATE INDEX idx_products_category
@@ -336,3 +378,21 @@ CREATE INDEX idx_favorites_user
 
 CREATE INDEX idx_favorites_product
     ON favorites(product_id);
+
+CREATE INDEX idx_notifications_user
+    ON notifications(user_id);
+
+CREATE INDEX idx_notifications_read
+    ON notifications(user_id, read);
+
+CREATE INDEX idx_notifications_created
+    ON notifications(user_id, created_at DESC);
+
+CREATE INDEX idx_warehouses_active 
+    ON warehouses(active);
+
+CREATE INDEX idx_inventory_product 
+    ON inventory(product_id);
+
+CREATE INDEX idx_inventory_warehouse 
+    ON inventory(warehouse_id);

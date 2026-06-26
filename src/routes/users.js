@@ -1,11 +1,13 @@
 import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import pool from '../db/pool.js';
+import { authenticate, authorize, generateToken } from '../middleware/auth.js';
+import { strictRateLimit } from '../middleware/rateLimit.js';
 
 const router = Router();
 
 // GET /api/users - Get all users
-router.get('/', async (req, res) => {
+router.get('/', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, res) => {
   try {
     const result = await pool.query(
       'SELECT id, email, name, phone, role, points, created_at, updated_at FROM users ORDER BY created_at DESC'
@@ -13,43 +15,48 @@ router.get('/', async (req, res) => {
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching users:', error);
-    res.status(500).json({ error: 'Error fetching users' });
+    res.status(500).json({ error: 'Error al obtener los usuarios' });
   }
 });
 
 // GET /api/users/:id - Get user by ID
-router.get('/:id', async (req, res) => {
+router.get('/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
+
+    // Users can only see their own profile; admins/support can see any
+    if (req.user.id !== id && req.user.role !== 'ADMIN' && req.user.role !== 'SUPPORT') {
+      return res.status(403).json({ error: 'No tienes permiso para ver este perfil' });
+    }
     const result = await pool.query(
       'SELECT id, email, name, phone, role, points, created_at, updated_at FROM users WHERE id = $1',
       [id]
     );
     
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: 'Usuario no encontrado' });
     }
     
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error fetching user:', error);
-    res.status(500).json({ error: 'Error fetching user' });
+    res.status(500).json({ error: 'Error al obtener el usuario' });
   }
 });
 
 // POST /api/users - Create user (Register)
-router.post('/', async (req, res) => {
+router.post('/', strictRateLimit(), async (req, res) => {
   try {
     const { email, name, phone, password, role } = req.body;
     
     if (!password) {
-      return res.status(400).json({ error: 'Password is required' });
+      return res.status(400).json({ error: 'La contraseña es requerida' });
     }
     
     // Check if email already exists
     const existingUser = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
     if (existingUser.rows.length > 0) {
-      return res.status(400).json({ error: 'Email already exists' });
+      return res.status(400).json({ error: 'El email ya está registrado' });
     }
     
     // Hash password
@@ -63,20 +70,23 @@ router.post('/', async (req, res) => {
       [email, name, phone, hashedPassword, role || 'CUSTOMER']
     );
     
-    res.status(201).json(result.rows[0]);
+    const user = result.rows[0];
+    const token = generateToken(user);
+
+    res.status(201).json({ token, user });
   } catch (error) {
     console.error('Error creating user:', error);
-    res.status(500).json({ error: 'Error creating user' });
+    res.status(500).json({ error: 'Error al crear el usuario' });
   }
 });
 
 // POST /api/users/login - Login
-router.post('/login', async (req, res) => {
+router.post('/login', strictRateLimit(), async (req, res) => {
   try {
     const { email, password } = req.body;
     
     if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
+      return res.status(400).json({ error: 'El email y la contraseña son requeridos' });
     }
     
     const result = await pool.query(
@@ -85,38 +95,52 @@ router.post('/login', async (req, res) => {
     );
     
     if (result.rows.length === 0) {
-      return res.status(401).json({ error: 'User not found' });
+      return res.status(401).json({ error: 'Credenciales invalidas' });
     }
     
     const user = result.rows[0];
     const validPassword = await bcrypt.compare(password, user.password);
     
     if (!validPassword) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return res.status(401).json({ error: 'Credenciales invalidas' });
     }
     
-    // In production, you'd return a JWT token here
+    const token = generateToken(user);
+
     res.json({
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      phone: user.phone,
-      role: user.role,
-      points: user.points || 0,
-      created_at: user.created_at,
-      updated_at: user.updated_at
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        phone: user.phone,
+        role: user.role,
+        points: user.points || 0,
+        created_at: user.created_at,
+        updated_at: user.updated_at
+      }
     });
   } catch (error) {
     console.error('Error logging in:', error);
-    res.status(500).json({ error: 'Error logging in' });
+    res.status(500).json({ error: 'Error al iniciar sesión' });
   }
 });
 
 // PUT /api/users/:id - Update user
-router.put('/:id', async (req, res) => {
+router.put('/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
     const { name, phone, role } = req.body;
+
+    // Users can only update their own profile; admins can update anyone
+    if (req.user.id !== id && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'No tienes permiso para actualizar este usuario' });
+    }
+
+    // Only admins can change roles
+    if (role && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'Solo los administradores pueden cambiar roles' });
+    }
     
     const result = await pool.query(
       `UPDATE users 
@@ -130,58 +154,68 @@ router.put('/:id', async (req, res) => {
     );
     
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: 'Usuario no encontrado' });
     }
     
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error updating user:', error);
-    res.status(500).json({ error: 'Error updating user' });
+    res.status(500).json({ error: 'Error al actualizar el usuario' });
   }
 });
 
 // DELETE /api/users/:id - Delete user
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
   try {
     const { id } = req.params;
     await pool.query('DELETE FROM users WHERE id = $1', [id]);
-    res.json({ message: 'User deleted' });
+    res.json({ message: 'Usuario eliminado' });
   } catch (error) {
     console.error('Error deleting user:', error);
-    res.status(500).json({ error: 'Error deleting user' });
+    res.status(500).json({ error: 'Error al eliminar el usuario' });
   }
 });
 
 // ==================== USER POINTS ====================
 
 // GET /api/users/:id/points - Get user points
-router.get('/:id/points', async (req, res) => {
+router.get('/:id/points', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
+
+    // Users can only see their own points; admins/support can see any
+    if (req.user.id !== id && req.user.role !== 'ADMIN' && req.user.role !== 'SUPPORT') {
+      return res.status(403).json({ error: 'No tienes permiso para ver los puntos de otro usuario' });
+    }
     const result = await pool.query(
       'SELECT points FROM users WHERE id = $1',
       [id]
     );
     
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: 'Usuario no encontrado' });
     }
     
     res.json({ points: result.rows[0].points || 0 });
   } catch (error) {
     console.error('Error fetching points:', error);
-    res.status(500).json({ error: 'Error fetching points' });
+    res.status(500).json({ error: 'Error al obtener los puntos' });
   }
 });
 
-// POST /api/users/:id/points - Add points
-router.post('/:id/points', async (req, res) => {
+// POST /api/users/:id/points - Add points (user self or admin)
+router.post('/:id/points', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
     const { points, description } = req.body;
+
+    // Users can only add points to their own account; admins can add to anyone
+    if (req.user.id !== id && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'No tienes permiso para modificar puntos de otro usuario' });
+    }
     
     if (!points || points <= 0) {
-      return res.status(400).json({ error: 'Points must be a positive number' });
+      return res.status(400).json({ error: 'Los puntos deben ser un número positivo' });
     }
     
     const result = await pool.query(
@@ -194,35 +228,35 @@ router.post('/:id/points', async (req, res) => {
     );
     
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: 'Usuario no encontrado' });
     }
     
     res.json({ points: result.rows[0].points });
   } catch (error) {
     console.error('Error adding points:', error);
-    res.status(500).json({ error: 'Error adding points' });
+    res.status(500).json({ error: 'Error al agregar puntos' });
   }
 });
 
 // POST /api/users/:id/points/deduct - Deduct points
-router.post('/:id/points/deduct', async (req, res) => {
+router.post('/:id/points/deduct', authenticate, authorize('ADMIN'), async (req, res) => {
   try {
     const { id } = req.params;
     const { points, description } = req.body;
     
     if (!points || points <= 0) {
-      return res.status(400).json({ error: 'Points must be a positive number' });
+      return res.status(400).json({ error: 'Los puntos deben ser un número positivo' });
     }
     
     // Check if user has enough points
     const userCheck = await pool.query('SELECT points FROM users WHERE id = $1', [id]);
     if (userCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: 'Usuario no encontrado' });
     }
     
     const currentPoints = userCheck.rows[0].points || 0;
     if (currentPoints < points) {
-      return res.status(400).json({ error: 'Insufficient points' });
+      return res.status(400).json({ error: 'Puntos insuficientes' });
     }
     
     const result = await pool.query(
@@ -237,16 +271,19 @@ router.post('/:id/points/deduct', async (req, res) => {
     res.json({ points: result.rows[0].points });
   } catch (error) {
     console.error('Error deducting points:', error);
-    res.status(500).json({ error: 'Error deducting points' });
+    res.status(500).json({ error: 'Error al deducir puntos' });
   }
 });
 
 // ==================== USER ADDRESSES ====================
 
 // GET /api/users/:id/addresses - Get user addresses
-router.get('/:id/addresses', async (req, res) => {
+router.get('/:id/addresses', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
+    if (req.user.id !== id && req.user.role !== 'ADMIN' && req.user.role !== 'SUPPORT') {
+      return res.status(403).json({ error: 'No tienes permiso para ver estas direcciones' });
+    }
     const result = await pool.query(
       'SELECT * FROM addresses WHERE user_id = $1 ORDER BY is_default DESC, created_at DESC',
       [id]
@@ -254,14 +291,17 @@ router.get('/:id/addresses', async (req, res) => {
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching addresses:', error);
-    res.status(500).json({ error: 'Error fetching addresses' });
+    res.status(500).json({ error: 'Error al obtener las direcciones' });
   }
 });
 
 // POST /api/users/:id/addresses - Create address
-router.post('/:id/addresses', async (req, res) => {
+router.post('/:id/addresses', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
+    if (req.user.id !== id && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'No puedes crear direcciones para otro usuario' });
+    }
     const { label, street, number, colony, city, state, zipCode, country, isDefault, references, latitude, longitude } = req.body;
     
     const result = await pool.query(
@@ -274,14 +314,17 @@ router.post('/:id/addresses', async (req, res) => {
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Error creating address:', error);
-    res.status(500).json({ error: 'Error creating address' });
+    res.status(500).json({ error: 'Error al crear la dirección' });
   }
 });
 
 // PUT /api/users/:userId/addresses/:addressId - Update address
-router.put('/:userId/addresses/:addressId', async (req, res) => {
+router.put('/:userId/addresses/:addressId', authenticate, async (req, res) => {
   try {
     const { userId, addressId } = req.params;
+    if (req.user.id !== userId && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'No puedes actualizar direcciones de otro usuario' });
+    }
     const { label, street, number, colony, city, state, zipCode, isDefault, references, latitude, longitude } = req.body;
     
     const result = await pool.query(
@@ -304,20 +347,23 @@ router.put('/:userId/addresses/:addressId', async (req, res) => {
     );
     
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Address not found' });
+      return res.status(404).json({ error: 'Dirección no encontrada' });
     }
     
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error updating address:', error);
-    res.status(500).json({ error: 'Error updating address' });
+    res.status(500).json({ error: 'Error al actualizar la dirección' });
   }
 });
 
 // DELETE /api/users/:userId/addresses/:addressId - Delete address
-router.delete('/:userId/addresses/:addressId', async (req, res) => {
+router.delete('/:userId/addresses/:addressId', authenticate, async (req, res) => {
   try {
     const { userId, addressId } = req.params;
+    if (req.user.id !== userId && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'No puedes eliminar direcciones de otro usuario' });
+    }
     
     const result = await pool.query(
       'DELETE FROM addresses WHERE id = $1 AND user_id = $2 RETURNING id',
@@ -325,22 +371,25 @@ router.delete('/:userId/addresses/:addressId', async (req, res) => {
     );
     
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Address not found' });
+      return res.status(404).json({ error: 'Dirección no encontrada' });
     }
     
-    res.json({ message: 'Address deleted' });
+    res.json({ message: 'Dirección eliminada' });
   } catch (error) {
     console.error('Error deleting address:', error);
-    res.status(500).json({ error: 'Error deleting address' });
+    res.status(500).json({ error: 'Error al eliminar la dirección' });
   }
 });
 
 // ==================== USER VEHICLES ====================
 
 // GET /api/users/:id/vehicles - Get user vehicles
-router.get('/:id/vehicles', async (req, res) => {
+router.get('/:id/vehicles', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
+    if (req.user.id !== id && req.user.role !== 'ADMIN' && req.user.role !== 'SUPPORT') {
+      return res.status(403).json({ error: 'No tienes permiso para ver estos vehiculos' });
+    }
     const result = await pool.query(
       'SELECT * FROM vehicles WHERE user_id = $1 ORDER BY created_at DESC',
       [id]
@@ -348,14 +397,17 @@ router.get('/:id/vehicles', async (req, res) => {
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching vehicles:', error);
-    res.status(500).json({ error: 'Error fetching vehicles' });
+    res.status(500).json({ error: 'Error al obtener los vehículos' });
   }
 });
 
 // POST /api/users/:id/vehicles - Create vehicle
-router.post('/:id/vehicles', async (req, res) => {
+router.post('/:id/vehicles', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
+    if (req.user.id !== id && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'No puedes crear vehiculos para otro usuario' });
+    }
     const { brand, model, year, engine, plate, vin } = req.body;
     
     const result = await pool.query(
@@ -368,16 +420,19 @@ router.post('/:id/vehicles', async (req, res) => {
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Error creating vehicle:', error);
-    res.status(500).json({ error: 'Error creating vehicle' });
+    res.status(500).json({ error: 'Error al crear el vehículo' });
   }
 });
 
 // ==================== USER FAVORITES ====================
 
 // GET /api/users/:id/favorites - Get user favorite product IDs
-router.get('/:id/favorites', async (req, res) => {
+router.get('/:id/favorites', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
+    if (req.user.id !== id && req.user.role !== 'ADMIN' && req.user.role !== 'SUPPORT') {
+      return res.status(403).json({ error: 'No tienes permiso para ver estos favoritos' });
+    }
     const result = await pool.query(
       'SELECT product_id FROM favorites WHERE user_id = $1 ORDER BY created_at DESC',
       [id]
@@ -385,18 +440,21 @@ router.get('/:id/favorites', async (req, res) => {
     res.json(result.rows.map((r) => r.product_id));
   } catch (error) {
     console.error('Error fetching favorites:', error);
-    res.status(500).json({ error: 'Error fetching favorites' });
+    res.status(500).json({ error: 'Error al obtener los favoritos' });
   }
 });
 
 // POST /api/users/:id/favorites - Add product to favorites
-router.post('/:id/favorites', async (req, res) => {
+router.post('/:id/favorites', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
+    if (req.user.id !== id && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'No puedes agregar favoritos a otro usuario' });
+    }
     const { productId } = req.body;
     
     if (!productId) {
-      return res.status(400).json({ error: 'productId is required' });
+      return res.status(400).json({ error: 'El ID del producto es requerido' });
     }
     
     await pool.query(
@@ -404,27 +462,30 @@ router.post('/:id/favorites', async (req, res) => {
       [id, productId]
     );
     
-    res.json({ message: 'Added to favorites' });
+    res.json({ message: 'Añadido a favoritos' });
   } catch (error) {
     console.error('Error adding favorite:', error);
-    res.status(500).json({ error: 'Error adding favorite' });
+    res.status(500).json({ error: 'Error al agregar a favoritos' });
   }
 });
 
 // DELETE /api/users/:id/favorites/:productId - Remove product from favorites
-router.delete('/:id/favorites/:productId', async (req, res) => {
+router.delete('/:id/favorites/:productId', authenticate, async (req, res) => {
   try {
     const { id, productId } = req.params;
+    if (req.user.id !== id && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'No puedes eliminar favoritos de otro usuario' });
+    }
     
     await pool.query(
       'DELETE FROM favorites WHERE user_id = $1 AND product_id = $2',
       [id, productId]
     );
     
-    res.json({ message: 'Removed from favorites' });
+    res.json({ message: 'Eliminado de favoritos' });
   } catch (error) {
     console.error('Error removing favorite:', error);
-    res.status(500).json({ error: 'Error removing favorite' });
+    res.status(500).json({ error: 'Error al eliminar de favoritos' });
   }
 });
 

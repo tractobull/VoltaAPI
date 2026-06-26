@@ -8,18 +8,13 @@ const chatService = new ChatService();
 // POST /api/chat - Send message (legacy, no streaming)
 router.post('/', async (req, res) => {
   try {
-    const { message, sessionId } = req.body;
+    const { message, sessionId, userId } = req.body;
 
     if (!message || typeof message !== 'string') {
-      return res.status(400).json({ error: 'Message is required' });
+      return res.status(400).json({ error: 'Se requiere un mensaje' });
     }
 
-    console.log('[Legacy Chat] Request:', { message, sessionId });
-
-    const messages = [{ role: 'user', content: message }];
-    const result = await chatService.sendMessage(messages, sessionId);
-
-    console.log('[Legacy Chat] Response:', { contentLength: result.content?.length, sessionId: result.sessionId });
+    const result = await chatService.sendMessage(message, sessionId, userId);
 
     res.json({
       content: result.content,
@@ -37,10 +32,8 @@ router.post('/stream', async (req, res) => {
   try {
     const { message, history = [], sessionId, userId } = req.body;
 
-    console.log('[Stream] Request received:', { message, sessionId, userId, historyLength: history.length });
-
     if (!message || typeof message !== 'string') {
-      return res.status(400).json({ error: 'Message is required' });
+      return res.status(400).json({ error: 'Se requiere un mensaje' });
     }
 
     // Headers SSE
@@ -55,7 +48,6 @@ router.post('/stream', async (req, res) => {
       res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
 
-    console.log('[Stream] Preparing stream...');
     // Preparar sesión y obtener mensajes completos desde DB
     const { sessionId: currentSessionId, chatMessages } = await chatService.prepareStream(
       message,
@@ -63,12 +55,8 @@ router.post('/stream', async (req, res) => {
       userId
     );
 
-    console.log('[Stream] Session prepared:', { currentSessionId, messagesCount: chatMessages.length });
-
     // Emitir sessionId al cliente para que lo guarde
     sendEvent('session', { sessionId: currentSessionId });
-
-    console.log('[Stream] Calling Groq API...');
 
     // Reintentar en caso de rate limit
     let retryCount = 0;
@@ -130,12 +118,9 @@ router.post('/stream', async (req, res) => {
       break; // Éxito, salir del loop
     }
 
-    console.log('[Stream] Groq response status:', groqResponse.status);
-
     if (!groqResponse.ok) {
       const errorText = await groqResponse.text().catch(() => 'Unknown error');
       sendEvent('error', { message: `Groq error: ${groqResponse.status}` });
-      console.error('[Stream] Groq API error:', errorText);
       res.end();
       return;
     }
@@ -186,7 +171,7 @@ router.post('/stream', async (req, res) => {
       res.write(`event: error\ndata: ${JSON.stringify({ message: 'Error interno del servidor' })}\n\n`);
       res.end();
     } else {
-      res.status(500).json({ error: 'Error processing stream' });
+      res.status(500).json({ error: 'Error interno del servidor' });
     }
   }
 });
@@ -199,7 +184,7 @@ router.get('/:sessionId', async (req, res) => {
     res.json({ messages });
   } catch (error) {
     console.error('Error fetching chat:', error);
-    res.status(500).json({ error: 'Error fetching chat messages' });
+    res.status(500).json({ error: 'Error al obtener los mensajes del chat' });
   }
 });
 
@@ -209,10 +194,10 @@ router.delete('/:sessionId', async (req, res) => {
     const sessionId = req.params.sessionId;
     await pool.query('DELETE FROM chat_messages WHERE session_id = $1', [sessionId]);
     await pool.query('DELETE FROM chat_sessions WHERE id = $1', [sessionId]);
-    res.json({ message: 'Session deleted' });
+    res.json({ message: 'Sesión eliminada' });
   } catch (error) {
     console.error('Error deleting session:', error);
-    res.status(500).json({ error: 'Error deleting session' });
+    res.status(500).json({ error: 'Error al eliminar la sesión' });
   }
 });
 

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import pool from '../db/pool.js';
+import { authenticate, authorize } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -10,7 +11,7 @@ router.get('/', async (req, res) => {
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching brands:', error);
-    res.status(500).json({ error: 'Error fetching brands' });
+    res.status(500).json({ error: 'Error al obtener las marcas' });
   }
 });
 
@@ -21,18 +22,18 @@ router.get('/:id', async (req, res) => {
     const result = await pool.query('SELECT * FROM brands WHERE id = $1', [id]);
     
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Brand not found' });
+      return res.status(404).json({ error: 'Marca no encontrada' });
     }
     
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error fetching brand:', error);
-    res.status(500).json({ error: 'Error fetching brand' });
+    res.status(500).json({ error: 'Error al obtener la marca' });
   }
 });
 
 // POST /api/brands - Create brand
-router.post('/', async (req, res) => {
+router.post('/', authenticate, authorize('ADMIN'), async (req, res) => {
   try {
     const { id, name, logo } = req.body;
     const result = await pool.query(
@@ -42,12 +43,12 @@ router.post('/', async (req, res) => {
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Error creating brand:', error);
-    res.status(500).json({ error: 'Error creating brand' });
+    res.status(500).json({ error: 'Error al crear la marca' });
   }
 });
 
 // PUT /api/brands/:id - Update brand
-router.put('/:id', async (req, res) => {
+router.put('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
   try {
     const { id } = req.params;
     const { name, logo } = req.body;
@@ -57,25 +58,25 @@ router.put('/:id', async (req, res) => {
     );
     
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Brand not found' });
+      return res.status(404).json({ error: 'Marca no encontrada' });
     }
     
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error updating brand:', error);
-    res.status(500).json({ error: 'Error updating brand' });
+    res.status(500).json({ error: 'Error al actualizar la marca' });
   }
 });
 
 // DELETE /api/brands/:id - Delete brand
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
   try {
     const { id } = req.params;
     await pool.query('DELETE FROM brands WHERE id = $1', [id]);
-    res.json({ message: 'Brand deleted' });
+    res.json({ message: 'Marca eliminada' });
   } catch (error) {
     console.error('Error deleting brand:', error);
-    res.status(500).json({ error: 'Error deleting brand' });
+    res.status(500).json({ error: 'Error al eliminar la marca' });
   }
 });
 

@@ -1,9 +1,99 @@
 import { Router } from 'express';
 import pool from '../db/pool.js';
 import { ChatService } from '../services/chatService.js';
+import { authenticate, authorize } from '../middleware/auth.js';
 
 const router = Router();
 const chatService = new ChatService();
+
+// GET /api/products/inventory-check - Check inventory across warehouses for cart items
+router.get('/inventory-check', async (req, res) => {
+  try {
+    const { productIds, lat, lng } = req.query;
+    
+    if (!productIds) {
+      return res.status(400).json({ error: 'Se requieren los IDs de los productos' });
+    }
+
+    const productIdArray = Array.isArray(productIds) ? productIds : productIds.split(',');
+    
+    // Get inventory for all warehouses for these products
+    const inventoryResult = await pool.query(
+      `SELECT 
+        w.id as warehouse_id,
+        w.name as warehouse_name,
+        w.lat,
+        w.lng,
+        i.product_id,
+        i.stock,
+        p.name as product_name
+       FROM warehouses w
+       LEFT JOIN inventory i ON w.id = i.warehouse_id
+       LEFT JOIN products p ON i.product_id = p.id
+       WHERE w.active = true 
+         AND (i.product_id = ANY($1) OR i.product_id IS NULL)
+       ORDER BY w.id, i.product_id`,
+      [productIdArray]
+    );
+
+    // Group by warehouse
+    const warehouseMap = new Map();
+    inventoryResult.rows.forEach(row => {
+      if (!warehouseMap.has(row.warehouse_id)) {
+        warehouseMap.set(row.warehouse_id, {
+          id: row.warehouse_id,
+          name: row.warehouse_name,
+          lat: row.lat,
+          lng: row.lng,
+          products: [],
+          distance: null
+        });
+      }
+      
+      if (row.product_id) {
+        warehouseMap.get(row.warehouse_id).products.push({
+          productId: row.product_id,
+          productName: row.product_name,
+          stock: row.stock
+        });
+      }
+    });
+
+    // Calculate distances if coordinates provided
+    if (lat && lng) {
+      const userLat = parseFloat(lat);
+      const userLng = parseFloat(lng);
+      
+      warehouseMap.forEach(warehouse => {
+        if (warehouse.lat && warehouse.lng) {
+          const R = 6371; // Earth's radius in km
+          const dLat = (warehouse.lat - userLat) * Math.PI / 180;
+          const dLon = (warehouse.lng - userLng) * Math.PI / 180;
+          const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                    Math.cos(userLat * Math.PI / 180) * Math.cos(warehouse.lat * Math.PI / 180) *
+                    Math.sin(dLon/2) * Math.sin(dLon/2);
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+          warehouse.distance = R * c;
+        }
+      });
+    }
+
+    // Convert to array and sort by distance if available
+    const warehouses = Array.from(warehouseMap.values());
+    if (lat && lng) {
+      warehouses.sort((a, b) => {
+        if (a.distance === null) return 1;
+        if (b.distance === null) return -1;
+        return a.distance - b.distance;
+      });
+    }
+
+    res.json({ warehouses });
+  } catch (error) {
+    console.error('Error checking inventory:', error);
+    res.status(500).json({ error: 'Error al verificar el inventario' });
+  }
+});
 
 // GET /api/products/search - Search products with pagination
 router.get('/search', async (req, res) => {
@@ -17,16 +107,16 @@ router.get('/search', async (req, res) => {
     const params = [];
     let paramIndex = 1;
 
-    if (q) {
+    if (q && q !== '' && q !== null && q !== undefined) {
       whereClause += ` AND (p.name ILIKE $${paramIndex} OR p.description ILIKE $${paramIndex} OR b.name ILIKE $${paramIndex})`;
       params.push(`%${q}%`);
       paramIndex++;
     }
-    if (category) {
+    if (category && category !== '' && category !== null && category !== undefined) {
       whereClause += ` AND p.category_id = $${paramIndex++}`;
       params.push(category);
     }
-    if (brand) {
+    if (brand && brand !== '' && brand !== null && brand !== undefined) {
       whereClause += ` AND p.brand_id = $${paramIndex++}`;
       params.push(brand);
     }
@@ -39,11 +129,14 @@ router.get('/search', async (req, res) => {
 
     const query = `
       SELECT p.*, b.name as brand_name, b.logo as brand_logo, 
-             c.name as category_name, c.icon as category_icon
+             c.name as category_name, c.icon as category_icon,
+             COALESCE(SUM(i.stock), 0) as total_stock
       FROM products p
       JOIN brands b ON p.brand_id = b.id
       JOIN categories c ON p.category_id = c.id
+      LEFT JOIN inventory i ON p.id = i.product_id
       ${whereClause}
+      GROUP BY p.id, b.name, b.logo, c.name, c.icon
       ORDER BY p.name ASC
       LIMIT $${paramIndex++} OFFSET $${paramIndex++}
     `;
@@ -51,28 +144,37 @@ router.get('/search', async (req, res) => {
 
     const result = await pool.query(query, params);
     
-    const products = await Promise.all(result.rows.map(async (product) => {
+    // Batch fetch vehicle compatibility for all products (avoids N+1)
+    const productIds = result.rows.map((p) => p.id);
+    let vehicleMap = {};
+    if (productIds.length > 0) {
       const vehicleResult = await pool.query(
-        'SELECT * FROM vehicle_compatibility WHERE product_id = $1',
-        [product.id]
+        'SELECT * FROM vehicle_compatibility WHERE product_id = ANY($1)',
+        [productIds]
       );
-      return {
-        id: product.id,
-        name: product.name,
-        price: Number(product.price),
-        discountedPrice: product.discount_percent > 0 
-          ? Math.round(Number(product.price) * (1 - Number(product.discount_percent) / 100) * 100) / 100 
-          : Number(product.price),
-        discountPercent: Number(product.discount_percent) || 0,
-        image: product.image,
-        available: product.available,
-        description: product.description,
-        brand: product.brand_name,
-        categoryId: product.category_id,
-        vehicleCompatibility: vehicleResult.rows[0] || null,
-        created_at: product.created_at,
-        updated_at: product.updated_at,
-      };
+      vehicleResult.rows.forEach((v) => {
+        if (!vehicleMap[v.product_id]) vehicleMap[v.product_id] = [];
+        vehicleMap[v.product_id].push(v);
+      });
+    }
+
+    const products = result.rows.map((product) => ({
+      id: product.id,
+      name: product.name,
+      price: Number(product.price),
+      discountedPrice: product.discount_percent > 0 
+        ? Math.round(Number(product.price) * (1 - Number(product.discount_percent) / 100) * 100) / 100 
+        : Number(product.price),
+      discountPercent: Number(product.discount_percent) || 0,
+      image: product.image,
+      available: product.available,
+      description: product.description,
+      brand: product.brand_name,
+      categoryId: product.category_id,
+      totalStock: Number(product.total_stock) || 0,
+      vehicleCompatibility: vehicleMap[product.id]?.[0] || null,
+      created_at: product.created_at,
+      updated_at: product.updated_at,
     }));
 
     res.json({
@@ -86,7 +188,7 @@ router.get('/search', async (req, res) => {
     });
   } catch (error) {
     console.error('Error searching products:', error);
-    res.status(500).json({ error: 'Error searching products' });
+    res.status(500).json({ error: 'Error al buscar productos' });
   }
 });
 
@@ -96,7 +198,7 @@ router.post('/ai-search', async (req, res) => {
     const { query } = req.body;
 
     if (!query || typeof query !== 'string') {
-      return res.status(400).json({ error: 'Query is required' });
+      return res.status(400).json({ error: 'Se requiere una consulta' });
     }
 
     const result = await chatService.sendMessage([
@@ -106,7 +208,7 @@ router.post('/ai-search', async (req, res) => {
     res.json({ content: result.content, sessionId: result.sessionId });
   } catch (error) {
     console.error('Error in AI search:', error);
-    res.status(500).json({ error: 'Error in AI search' });
+    res.status(500).json({ error: 'Error al buscar productos con IA' });
   }
 });
 
@@ -117,67 +219,76 @@ router.get('/', async (req, res) => {
     
     let query = `
       SELECT p.*, b.name as brand_name, b.logo as brand_logo, 
-             c.name as category_name, c.icon as category_icon
+             c.name as category_name, c.icon as category_icon,
+             COALESCE(SUM(i.stock), 0) as total_stock
       FROM products p
       JOIN brands b ON p.brand_id = b.id
       JOIN categories c ON p.category_id = c.id
+      LEFT JOIN inventory i ON p.id = i.product_id
       WHERE 1=1
     `;
     const params = [];
     let paramIndex = 1;
 
-    if (category) {
-      query += ` AND p.category_id = $${paramIndex++}`;
-      params.push(category);
-    }
-    if (brand) {
-      query += ` AND p.brand_id = $${paramIndex++}`;
-      params.push(brand);
-    }
-    if (available !== undefined) {
+    if (available !== undefined && available !== '' && available !== null) {
       query += ` AND p.available = $${paramIndex++}`;
-      params.push(available === 'true');
+      params.push(available === 'true' || available === true);
     }
-    if (search) {
+    if (category && category !== '' && category !== null && category !== undefined) {
+      query += ` AND p.category_id = $${paramIndex++}`;
+      params.push(String(category));
+    }
+    if (brand && brand !== '' && brand !== null && brand !== undefined) {
+      query += ` AND p.brand_id = $${paramIndex++}`;
+      params.push(String(brand));
+    }
+    if (search && search !== '' && search !== null && search !== undefined) {
       query += ` AND (p.name ILIKE $${paramIndex} OR p.description ILIKE $${paramIndex} OR b.name ILIKE $${paramIndex})`;
-      params.push(`%${search}%`);
+      params.push(`%${String(search)}%`);
       paramIndex++;
     }
 
-    query += ' ORDER BY p.name ASC';
+    query += ' GROUP BY p.id, b.name, b.logo, c.name, c.icon ORDER BY p.name ASC';
 
     const result = await pool.query(query, params);
     
-    const products = await Promise.all(
-      result.rows.map(async (product) => {
-        const vehicleResult = await pool.query(
-          'SELECT * FROM vehicle_compatibility WHERE product_id = $1',
-          [product.id]
-        );
-        return {
-          id: product.id,
-          name: product.name,
-          price: Number(product.price),
-          discountedPrice: product.discount_percent > 0 
-            ? Math.round(Number(product.price) * (1 - Number(product.discount_percent) / 100) * 100) / 100 
-            : Number(product.price),
-          discountPercent: Number(product.discount_percent) || 0,
-          image: product.image,
-          available: product.available,
-          description: product.description,
-          brand: { id: product.brand_id, name: product.brand_name, logo: product.brand_logo },
-          category: { id: product.category_id, name: product.category_name, icon: product.category_icon },
-          vehicles: vehicleResult.rows,
-          created_at: product.created_at,
-          updated_at: product.updated_at,
-        };
-      })
-    );
+    // Batch fetch vehicle compatibility for all products (avoids N+1)
+    const productIds = result.rows.map((p) => p.id);
+    let vehicleMap = {};
+    if (productIds.length > 0) {
+      const vehicleResult = await pool.query(
+        'SELECT * FROM vehicle_compatibility WHERE product_id = ANY($1)',
+        [productIds]
+      );
+      vehicleResult.rows.forEach((v) => {
+        if (!vehicleMap[v.product_id]) vehicleMap[v.product_id] = [];
+        vehicleMap[v.product_id].push(v);
+      });
+    }
+
+    const products = result.rows.map((product) => ({
+      id: product.id,
+      name: product.name,
+      price: Number(product.price),
+      discountedPrice: product.discount_percent > 0 
+        ? Math.round(Number(product.price) * (1 - Number(product.discount_percent) / 100) * 100) / 100 
+        : Number(product.price),
+      discountPercent: Number(product.discount_percent) || 0,
+      image: product.image,
+      available: product.available,
+      description: product.description,
+      brand: { id: product.brand_id, name: product.brand_name, logo: product.brand_logo },
+      category: { id: product.category_id, name: product.category_name, icon: product.category_icon },
+      totalStock: Number(product.total_stock) || 0,
+      vehicles: vehicleMap[product.id] || [],
+      created_at: product.created_at,
+      updated_at: product.updated_at,
+    }));
 
     res.json(products);
   } catch (error) {
     console.error('Error fetching products:', error);
-    res.status(500).json({ error: 'Error fetching products' });
+    res.status(500).json({ error: 'Error al obtener los productos' });
   }
 });
 
@@ -185,19 +296,23 @@ router.get('/', async (req, res) => {
 router.get('/featured', async (_req, res) => {
   try {
     const discountedResult = await pool.query(
-      `SELECT p.*, b.name as brand_name 
+      `SELECT p.*, b.name as brand_name, COALESCE(SUM(i.stock), 0) as total_stock
        FROM products p 
        JOIN brands b ON p.brand_id = b.id 
+       LEFT JOIN inventory i ON p.id = i.product_id
        WHERE p.discount_percent > 0 AND p.available = true 
+       GROUP BY p.id, b.name
        ORDER BY p.discount_percent DESC 
        LIMIT 3`
     );
 
     const popularResult = await pool.query(
-      `SELECT p.*, b.name as brand_name 
+      `SELECT p.*, b.name as brand_name, COALESCE(SUM(i.stock), 0) as total_stock
        FROM products p 
        JOIN brands b ON p.brand_id = b.id 
+       LEFT JOIN inventory i ON p.id = i.product_id
        WHERE p.available = true 
+       GROUP BY p.id, b.name
        ORDER BY p.price DESC 
        LIMIT 6`
     );
@@ -214,6 +329,7 @@ router.get('/featured', async (_req, res) => {
       available: p.available,
       brand: p.brand_name,
       categoryId: p.category_id,
+      totalStock: Number(p.total_stock) || 0,
     });
 
     res.json({
@@ -222,7 +338,7 @@ router.get('/featured', async (_req, res) => {
     });
   } catch (error) {
     console.error('Error fetching featured products:', error);
-    res.status(500).json({ error: 'Error fetching featured products' });
+    res.status(500).json({ error: 'Error al obtener los productos destacados' });
   }
 });
 
@@ -233,11 +349,14 @@ router.get('/:id', async (req, res) => {
 
     const productResult = await pool.query(
       `SELECT p.*, b.name as brand_name, b.logo as brand_logo, 
-              c.name as category_name, c.icon as category_icon
+              c.name as category_name, c.icon as category_icon,
+              COALESCE(SUM(i.stock), 0) as total_stock
        FROM products p
        JOIN brands b ON p.brand_id = b.id
        JOIN categories c ON p.category_id = c.id
-       WHERE p.id = $1`,
+       LEFT JOIN inventory i ON p.id = i.product_id
+       WHERE p.id = $1
+       GROUP BY p.id, b.name, b.logo, c.name, c.icon`,
       [id]
     );
 
@@ -264,18 +383,19 @@ router.get('/:id', async (req, res) => {
       description: product.description,
       brand: { id: product.brand_id, name: product.brand_name, logo: product.brand_logo },
       category: { id: product.category_id, name: product.category_name, icon: product.category_icon },
+      totalStock: Number(product.total_stock) || 0,
       vehicles: vehicleResult.rows,
       created_at: product.created_at,
       updated_at: product.updated_at,
     });
   } catch (error) {
     console.error('Error fetching product:', error);
-    res.status(500).json({ error: 'Error fetching product' });
+    res.status(500).json({ error: 'Error al obtener el producto' });
   }
 });
 
 // POST /api/products - Create product
-router.post('/', async (req, res) => {
+router.post('/', authenticate, authorize('ADMIN'), async (req, res) => {
   try {
     const { id, name, brandId, categoryId, price, image, available, description, vehicles, discountPercent } = req.body;
 
@@ -320,12 +440,12 @@ router.post('/', async (req, res) => {
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Error creating product:', error);
-    res.status(500).json({ error: 'Error creating product' });
+    res.status(500).json({ error: 'Error al crear el producto' });
   }
 });
 
 // PUT /api/products/:id - Update product
-router.put('/:id', async (req, res) => {
+router.put('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
   try {
     const { id } = req.params;
     const { name, brandId, categoryId, price, image, available, description, discountPercent } = req.body;
@@ -353,12 +473,12 @@ router.put('/:id', async (req, res) => {
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error updating product:', error);
-    res.status(500).json({ error: 'Error updating product' });
+    res.status(500).json({ error: 'Error al actualizar el producto' });
   }
 });
 
 // DELETE /api/products/:id - Delete product
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -369,10 +489,10 @@ router.delete('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Product not found' });
     }
 
-    res.json({ message: 'Product deleted' });
+    res.json({ message: 'Producto eliminado' });
   } catch (error) {
     console.error('Error deleting product:', error);
-    res.status(500).json({ error: 'Error deleting product' });
+    res.status(500).json({ error: 'Error al eliminar el producto' });
   }
 });
 
