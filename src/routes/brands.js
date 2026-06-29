@@ -37,7 +37,7 @@ router.post('/', authenticate, authorize('ADMIN'), async (req, res) => {
   try {
     const { id, name, logo } = req.body;
     const result = await pool.query(
-      'INSERT INTO brands (id, name, logo) VALUES ($1, $2, $3) RETURNING *',
+      'INSERT INTO brands (id, name, logo, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING *',
       [id, name, logo]
     );
     res.status(201).json(result.rows[0]);
@@ -53,7 +53,7 @@ router.put('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
     const { id } = req.params;
     const { name, logo } = req.body;
     const result = await pool.query(
-      'UPDATE brands SET name = COALESCE($1, name), logo = COALESCE($2, logo) WHERE id = $3 RETURNING *',
+      'UPDATE brands SET name = COALESCE($1, name), logo = COALESCE($2, logo), updated_at = NOW() WHERE id = $3 RETURNING *',
       [name, logo, id]
     );
     

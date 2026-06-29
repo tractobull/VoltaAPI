@@ -201,9 +201,7 @@ router.post('/ai-search', async (req, res) => {
       return res.status(400).json({ error: 'Se requiere una consulta' });
     }
 
-    const result = await chatService.sendMessage([
-      { role: 'user', content: `Busca productos de repuestos para camiones pesados relacionados con: "${query}". Responde SOLO en español listando los productos más relevantes de nuestro catálogo. Usa EXACTAMENTE el formato [producto:id] para cada producto. Máximo 3 productos. Si no hay coincidencias, di que no encontraste productos.` }
-    ]);
+    const result = await chatService.sendMessage(`Busca productos de repuestos para camiones pesados relacionados con: "${query}". Responde SOLO en español listando los productos más relevantes de nuestro catálogo. Usa EXACTAMENTE el formato [producto:id] para cada producto. Máximo 3 productos. Si no hay coincidencias, di que no encontraste productos.`);
 
     res.json({ content: result.content, sessionId: result.sessionId });
   } catch (error) {
@@ -218,7 +216,7 @@ router.get('/', async (req, res) => {
     const { category, brand, search, available } = req.query;
     
     let query = `
-      SELECT p.*, b.name as brand_name, b.logo as brand_logo, 
+      SELECT p.*, b.name as brand_name, b.logo as brand_logo, b.updated_at as brand_updated_at,
              c.name as category_name, c.icon as category_icon,
              COALESCE(SUM(i.stock), 0) as total_stock
       FROM products p
@@ -248,7 +246,7 @@ router.get('/', async (req, res) => {
       paramIndex++;
     }
 
-    query += ' GROUP BY p.id, b.name, b.logo, c.name, c.icon ORDER BY p.name ASC';
+    query += ' GROUP BY p.id, b.name, b.logo, b.updated_at, c.name, c.icon ORDER BY p.name ASC';
 
     const result = await pool.query(query, params);
     
@@ -277,7 +275,7 @@ router.get('/', async (req, res) => {
       image: product.image,
       available: product.available,
       description: product.description,
-      brand: { id: product.brand_id, name: product.brand_name, logo: product.brand_logo },
+      brand: { id: product.brand_id, name: product.brand_name, logo: product.brand_logo, updated_at: product.brand_updated_at },
       category: { id: product.category_id, name: product.category_name, icon: product.category_icon },
       totalStock: Number(product.total_stock) || 0,
       vehicles: vehicleMap[product.id] || [],
@@ -296,23 +294,23 @@ router.get('/', async (req, res) => {
 router.get('/featured', async (_req, res) => {
   try {
     const discountedResult = await pool.query(
-      `SELECT p.*, b.name as brand_name, COALESCE(SUM(i.stock), 0) as total_stock
+      `SELECT p.*, b.name as brand_name, b.logo as brand_logo, b.updated_at as brand_updated_at, COALESCE(SUM(i.stock), 0) as total_stock
        FROM products p 
        JOIN brands b ON p.brand_id = b.id 
        LEFT JOIN inventory i ON p.id = i.product_id
        WHERE p.discount_percent > 0 AND p.available = true 
-       GROUP BY p.id, b.name
+       GROUP BY p.id, b.name, b.logo, b.updated_at
        ORDER BY p.discount_percent DESC 
        LIMIT 3`
     );
 
     const popularResult = await pool.query(
-      `SELECT p.*, b.name as brand_name, COALESCE(SUM(i.stock), 0) as total_stock
+      `SELECT p.*, b.name as brand_name, b.logo as brand_logo, b.updated_at as brand_updated_at, COALESCE(SUM(i.stock), 0) as total_stock
        FROM products p 
        JOIN brands b ON p.brand_id = b.id 
        LEFT JOIN inventory i ON p.id = i.product_id
        WHERE p.available = true 
-       GROUP BY p.id, b.name
+       GROUP BY p.id, b.name, b.logo, b.updated_at
        ORDER BY p.price DESC 
        LIMIT 6`
     );
@@ -327,9 +325,10 @@ router.get('/featured', async (_req, res) => {
       discountPercent: Number(p.discount_percent) || 0,
       image: p.image,
       available: p.available,
-      brand: p.brand_name,
+      brand: { name: p.brand_name, logo: p.brand_logo, updated_at: p.brand_updated_at },
       categoryId: p.category_id,
       totalStock: Number(p.total_stock) || 0,
+      updated_at: p.updated_at,
     });
 
     res.json({

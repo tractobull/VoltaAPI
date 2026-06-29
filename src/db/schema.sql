@@ -90,7 +90,7 @@ CREATE TABLE vehicles (
 CREATE TABLE categories (
     id VARCHAR(50) PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
-    icon VARCHAR(50)
+    icon TEXT
 );
 
 -- ==================== BRANDS ====================
@@ -98,7 +98,9 @@ CREATE TABLE categories (
 CREATE TABLE brands (
     id VARCHAR(50) PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
-    logo VARCHAR(500)
+    logo TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- ==================== PRODUCTS ====================
@@ -394,5 +396,41 @@ CREATE INDEX idx_warehouses_active
 CREATE INDEX idx_inventory_product 
     ON inventory(product_id);
 
-CREATE INDEX idx_inventory_warehouse 
+CREATE INDEX idx_inventory_warehouse
     ON inventory(warehouse_id);
+
+-- Support chat messages table
+CREATE TABLE support_messages (
+    id SERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    sender_agent_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    message TEXT NOT NULL,
+    is_from_user BOOLEAN NOT NULL DEFAULT true,
+    is_read BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE support_settings (
+    id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    enabled BOOLEAN NOT NULL DEFAULT true,
+    updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO support_settings (id, enabled)
+VALUES (1, true)
+ON CONFLICT (id) DO NOTHING;
+
+CREATE INDEX idx_support_messages_user
+    ON support_messages(user_id);
+
+CREATE INDEX idx_support_messages_agent
+    ON support_messages(sender_agent_id);
+
+CREATE INDEX idx_support_messages_created
+    ON support_messages(user_id, created_at DESC);
+
+CREATE INDEX idx_support_messages_unread
+    ON support_messages(is_read) WHERE is_read = false AND is_from_user = false;

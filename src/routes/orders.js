@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import pool from '../db/pool.js';
 import { authenticate, authorize } from '../middleware/auth.js';
+import { getIO } from '../websocket/index.js';
 
 const router = Router();
 
@@ -318,9 +319,10 @@ router.post('/split', authenticate, async (req, res) => {
       }
 
       const orderShort = order.id.slice(0, 8).toUpperCase();
-      await pool.query(
+      const notificationResult = await pool.query(
         `INSERT INTO notifications (user_id, type, title, description, icon, data)
-         VALUES ($1, 'order', $2, $3, 'package', $4)`,
+         VALUES ($1, 'order', $2, $3, 'package', $4)
+         RETURNING *`,
         [
           userId,
           `Pedido ${orderShort} creado`,
@@ -328,6 +330,12 @@ router.post('/split', authenticate, async (req, res) => {
           JSON.stringify({ orderId: order.id }),
         ]
       );
+
+      // Emit websocket event for real-time notification
+      const io = getIO();
+      if (io) {
+        io.to(`user:${userId}`).emit('new_notification', notificationResult.rows[0]);
+      }
 
       createdOrders.push({
         ...order,
@@ -463,9 +471,10 @@ router.post('/', authenticate, async (req, res) => {
     await client.query('COMMIT');
 
     const orderShort = order.id.slice(0, 8).toUpperCase();
-    await pool.query(
+    const notificationResult = await pool.query(
       `INSERT INTO notifications (user_id, type, title, description, icon, data)
-       VALUES ($1, 'order', $2, $3, 'package', $4)`,
+       VALUES ($1, 'order', $2, $3, 'package', $4)
+       RETURNING *`,
       [
         userId,
         `Pedido ${orderShort} creado`,
@@ -473,6 +482,12 @@ router.post('/', authenticate, async (req, res) => {
         JSON.stringify({ orderId: order.id }),
       ]
     );
+
+    // Emit websocket event for real-time notification
+    const io = getIO();
+    if (io) {
+      io.to(`user:${userId}`).emit('new_notification', notificationResult.rows[0]);
+    }
 
     const fullOrderResult = await client.query(
       `SELECT o.*,
@@ -513,11 +528,13 @@ router.put('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
     
-    const statusLabels = {
-      PENDING: 'Pendiente',
-      SHIPPED: 'Enviado',
-      DELIVERED: 'Entregado',
-      CANCELLED: 'Cancelado',
+    const statusMessages = {
+      PENDING: "Tu pedido ha sido recibido y está pendiente de confirmación.",
+      CONFIRMED: "Tu pedido fue confirmado y pronto comenzará su preparación.",
+      PROCESSING: "Estamos preparando tu pedido.",
+      SHIPPED: "Tu pedido fue enviado y está en camino.",
+      DELIVERED: "Tu pedido fue entregado. ¡Gracias por tu compra!",
+      CANCELLED: "Tu pedido fue cancelado.",
     };
 
     // Get order to check it's status
@@ -547,16 +564,23 @@ router.put('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
     const order = result.rows[0];
     const orderShort = id.slice(0, 8).toUpperCase();
 
-    await pool.query(
+    const notificationResult = await pool.query(
       `INSERT INTO notifications (user_id, type, title, description, icon, data)
-       VALUES ($1, 'order', $2, $3, 'package', $4)`,
+       VALUES ($1, 'order', $2, $3, 'package', $4)
+       RETURNING *`,
       [
         order.user_id,
         `Pedido ${orderShort} actualizado`,
-        `Tu pedido ahora esta: ${statusLabels[status] || status}`,
+        statusMessages[status] ?? "El estado de tu pedido ha cambiado.",
         JSON.stringify({ orderId: id }),
       ]
     );
+
+    // Emit websocket event for real-time notification
+    const io = getIO();
+    if (io) {
+      io.to(`user:${order.user_id}`).emit('new_notification', notificationResult.rows[0]);
+    }
     
     res.json(order);
   } catch (error) {

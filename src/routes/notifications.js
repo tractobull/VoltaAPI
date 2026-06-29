@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import pool from '../db/pool.js';
 import { authenticate } from '../middleware/auth.js';
+import { getIO } from '../websocket/index.js';
 
 const router = Router();
 
@@ -81,6 +82,13 @@ router.post('/', authenticate, async (req, res) => {
        RETURNING *`,
       [userId, type, title, description, icon || 'bell', data ? JSON.stringify(data) : null]
     );
+    
+    // Emit websocket event for real-time notification
+    const io = getIO();
+    if (io) {
+      io.to(`user:${userId}`).emit('new_notification', result.rows[0]);
+    }
+    
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Error creating notification:', error);

@@ -1,9 +1,11 @@
 import 'dotenv/config';
 import express from 'express';
+import { createServer } from 'http';
 import cors from 'cors';
 import pool from './db/pool.js';
 import { rateLimit } from './middleware/rateLimit.js';
 import { authenticate } from './middleware/auth.js';
+import { initializeWebSocket } from './websocket/index.js';
 
 // Routes
 import productRoutes from './routes/products.js';
@@ -16,10 +18,15 @@ import paymentRoutes from './routes/payments.js';
 import promotionRoutes from './routes/promotions.js';
 import notificationRoutes from './routes/notifications.js';
 import warehouseRoutes from './routes/warehouses.js';
+import supportRoutes from './routes/support.js';
 
 // Initialize
 const app = express();
 const PORT = process.env.PORT || 3000;
+const server = createServer(app);
+
+// Initialize WebSocket
+initializeWebSocket(server);
 
 // Middleware
 const allowedOrigins = process.env.CORS_ORIGINS
@@ -50,6 +57,7 @@ app.use('/api/promotions', promotionRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/warehouses', warehouseRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/support', supportRoutes);
 
 // Global search
 app.get('/api/search', authenticate, async (req, res) => {
@@ -157,10 +165,11 @@ app.use((err, req, res, next) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`🚀 VoltaAPI running on http://localhost:${PORT}`);
   console.log(`📦 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🗄️  Database: PostgreSQL`);
+  console.log(`🔌 WebSocket enabled`);
 });
 
 // Graceful shutdown
