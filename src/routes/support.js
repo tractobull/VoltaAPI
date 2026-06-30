@@ -10,6 +10,7 @@ import {
   emitSupportStatus,
   getSupportChatPresence,
 } from '../websocket/index.js';
+import { ModerationService } from '../services/moderation/ModerationService.js';
 
 const router = Router();
 
@@ -91,16 +92,19 @@ router.post('/messages', authenticate, requireSupportEnabled, async (req, res) =
       return res.status(400).json({ error: 'El mensaje es requerido' });
     }
 
+    // Analyze message for moderation
+    const moderation = ModerationService.analyze(message);
+
     const result = await pool.query(
       `WITH inserted AS (
-         INSERT INTO support_messages (user_id, message, is_from_user, is_read)
-         VALUES ($1, $2, true, false)
+         INSERT INTO support_messages (user_id, message, is_from_user, is_read, moderation_score, moderation_severity, moderation_categories, moderation_flags, moderation_priority, sentiment, suggested_queue)
+         VALUES ($1, $2, true, false, $3, $4, $5, $6, $7, $8, $9)
          RETURNING *
        )
        SELECT inserted.*, u.name AS user_name, u.email AS user_email
        FROM inserted
        JOIN users u ON u.id = inserted.user_id`,
-      [userId, message.trim()]
+      [userId, message.trim(), moderation.score, moderation.severity, moderation.categories, moderation.flags, moderation.priority, moderation.sentiment, moderation.suggestedQueue]
     );
 
     // Emit to websocket
@@ -162,11 +166,39 @@ router.get('/chats', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, re
          (SELECT is_from_user FROM support_messages 
           WHERE user_id = sm.user_id 
           ORDER BY created_at DESC 
-          LIMIT 1) as last_message_from_user
+          LIMIT 1) as last_message_from_user,
+         (SELECT sentiment FROM support_messages
+          WHERE user_id = sm.user_id
+          ORDER BY created_at DESC
+          LIMIT 1) as sentiment,
+         (SELECT suggested_queue FROM support_messages
+          WHERE user_id = sm.user_id
+          ORDER BY created_at DESC
+          LIMIT 1) as suggested_queue,
+         MAX(sm.moderation_score) as max_moderation_score,
+         CASE MAX(CASE sm.moderation_severity
+           WHEN 'CRITICAL' THEN 3
+           WHEN 'HIGH' THEN 2
+           WHEN 'MEDIUM' THEN 1
+           ELSE 0
+         END)
+           WHEN 3 THEN 'CRITICAL'
+           WHEN 2 THEN 'HIGH'
+           WHEN 1 THEN 'MEDIUM'
+           ELSE 'LOW'
+         END as max_moderation_severity,
+         BOOL_OR(sm.moderation_priority) as has_priority,
+         (SELECT ARRAY_AGG(DISTINCT cat)
+          FROM (SELECT UNNEST(sm2.moderation_categories) as cat
+                FROM support_messages sm2
+                WHERE sm2.user_id = sm.user_id
+                  AND sm2.moderation_categories IS NOT NULL
+                  AND array_length(sm2.moderation_categories, 1) > 0) sub
+          WHERE cat IS NOT NULL) as all_categories
        FROM support_messages sm
        JOIN users u ON sm.user_id = u.id
        GROUP BY sm.user_id, u.name, u.email
-       ORDER BY last_message_at DESC`
+       ORDER BY has_priority DESC, unread_count DESC, last_message_at DESC`
     );
 
     res.json(result.rows);
@@ -301,10 +333,13 @@ router.post('/messages/:userId/reply', authenticate, authorize('ADMIN', 'SUPPORT
       });
     }
 
+    // Analyze message for moderation
+    const moderation = ModerationService.analyze(message);
+
     const result = await pool.query(
       `WITH inserted AS (
-         INSERT INTO support_messages (user_id, sender_agent_id, message, is_from_user, is_read)
-         VALUES ($1, $2, $3, false, false)
+         INSERT INTO support_messages (user_id, sender_agent_id, message, is_from_user, is_read, moderation_score, moderation_severity, moderation_categories, moderation_flags, moderation_priority, sentiment, suggested_queue)
+         VALUES ($1, $2, $3, false, false, $4, $5, $6, $7, $8, $9, $10)
          RETURNING *
        )
        SELECT inserted.*, u.name AS user_name, u.email AS user_email,
@@ -312,7 +347,7 @@ router.post('/messages/:userId/reply', authenticate, authorize('ADMIN', 'SUPPORT
        FROM inserted
        JOIN users u ON u.id = inserted.user_id
        JOIN users agent ON agent.id = inserted.sender_agent_id`,
-      [userId, req.user.id, message.trim()]
+      [userId, req.user.id, message.trim(), moderation.score, moderation.severity, moderation.categories, moderation.flags, moderation.priority, moderation.sentiment, moderation.suggestedQueue]
     );
 
     // Emit to websocket
@@ -416,6 +451,24 @@ router.get('/unread-count', authenticate, async (req, res) => {
   } catch (error) {
     console.error('Error fetching unread count:', error);
     res.status(500).json({ error: 'Error al obtener el contador de mensajes no leídos' });
+  }
+});
+
+// POST /api/support/check-warning - Check if message should trigger warning
+router.post('/check-warning', authenticate, async (req, res) => {
+  try {
+    const { message } = req.body;
+
+    if (!message || message.trim() === '') {
+      return res.status(400).json({ error: 'El mensaje es requerido' });
+    }
+
+    const warningCheck = ModerationService.checkWarning(message);
+
+    res.json(warningCheck);
+  } catch (error) {
+    console.error('Error checking message warning:', error);
+    res.status(500).json({ error: 'Error al verificar el mensaje' });
   }
 });
 

@@ -18,7 +18,7 @@ router.get('/', async (_req, res) => {
 });
 
 // GET /api/warehouses/all - Get ALL warehouses (admin)
-router.get('/all', authenticate, authorize('ADMIN'), async (_req, res) => {
+router.get('/all', authenticate, authorize('ADMIN', 'SUPPORT'), async (_req, res) => {
   try {
     const result = await pool.query(
       `SELECT * FROM warehouses ORDER BY name ASC`
@@ -87,7 +87,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/warehouses - Create warehouse (admin)
-router.post('/', authenticate, authorize('ADMIN'), async (req, res) => {
+router.post('/', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, res) => {
   try {
     const { name, address, lat, lng, phone } = req.body;
     const result = await pool.query(
@@ -104,7 +104,7 @@ router.post('/', authenticate, authorize('ADMIN'), async (req, res) => {
 });
 
 // PUT /api/warehouses/:id - Update warehouse (admin)
-router.put('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
+router.put('/:id', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, res) => {
   try {
     const { id } = req.params;
     const { name, address, lat, lng, phone, active } = req.body;
@@ -171,7 +171,7 @@ router.get('/:id/inventory', async (req, res) => {
 });
 
 // PUT /api/warehouses/:id/inventory - Upsert inventory (admin)
-router.put('/:id/inventory', authenticate, authorize('ADMIN'), async (req, res) => {
+router.put('/:id/inventory', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, res) => {
   try {
     const { id } = req.params;
     const { productId, stock } = req.body;

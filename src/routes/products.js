@@ -394,7 +394,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/products - Create product
-router.post('/', authenticate, authorize('ADMIN'), async (req, res) => {
+router.post('/', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, res) => {
   try {
     const { id, name, brandId, categoryId, price, image, available, description, vehicles, discountPercent } = req.body;
 
@@ -444,7 +444,7 @@ router.post('/', authenticate, authorize('ADMIN'), async (req, res) => {
 });
 
 // PUT /api/products/:id - Update product
-router.put('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
+router.put('/:id', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, res) => {
   try {
     const { id } = req.params;
     const { name, brandId, categoryId, price, image, available, description, discountPercent } = req.body;
@@ -496,7 +496,7 @@ router.delete('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
 });
 
 // GET /api/products/:id/inventory - Get product inventory across all warehouses
-router.get('/:id/inventory', authenticate, authorize('ADMIN'), async (req, res) => {
+router.get('/:id/inventory', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
@@ -515,7 +515,7 @@ router.get('/:id/inventory', authenticate, authorize('ADMIN'), async (req, res) 
 });
 
 // PUT /api/products/:id/inventory/:warehouseId - Update product inventory in specific warehouse
-router.put('/:id/inventory/:warehouseId', authenticate, authorize('ADMIN'), async (req, res) => {
+router.put('/:id/inventory/:warehouseId', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, res) => {
   try {
     const { id, warehouseId } = req.params;
     const { stock } = req.body;

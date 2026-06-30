@@ -33,7 +33,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/categories - Create category
-router.post('/', authenticate, authorize('ADMIN'), async (req, res) => {
+router.post('/', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, res) => {
   try {
     const { id, name, icon } = req.body;
     const result = await pool.query(
@@ -48,7 +48,7 @@ router.post('/', authenticate, authorize('ADMIN'), async (req, res) => {
 });
 
 // PUT /api/categories/:id - Update category
-router.put('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
+router.put('/:id', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, res) => {
   try {
     const { id } = req.params;
     const { name, icon } = req.body;

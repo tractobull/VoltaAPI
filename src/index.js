@@ -19,6 +19,9 @@ import promotionRoutes from './routes/promotions.js';
 import notificationRoutes from './routes/notifications.js';
 import warehouseRoutes from './routes/warehouses.js';
 import supportRoutes from './routes/support.js';
+import logRoutes from './routes/logs.js';
+import exportRoutes from './routes/export.js';
+import importRoutes from './routes/import.js';
 
 // Initialize
 const app = express();
@@ -58,6 +61,9 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/warehouses', warehouseRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/support', supportRoutes);
+app.use('/api/logs', logRoutes);
+app.use('/api/export', exportRoutes);
+app.use('/api/import', importRoutes);
 
 // Global search
 app.get('/api/search', authenticate, async (req, res) => {

@@ -408,7 +408,15 @@ CREATE TABLE support_messages (
     is_from_user BOOLEAN NOT NULL DEFAULT true,
     is_read BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    -- Moderation data
+    moderation_score INTEGER DEFAULT 0,
+    moderation_severity VARCHAR(20) DEFAULT 'LOW',
+    moderation_categories TEXT[] DEFAULT '{}',
+    moderation_flags TEXT[] DEFAULT '{}',
+    moderation_priority BOOLEAN DEFAULT false,
+    sentiment VARCHAR(20) NOT NULL DEFAULT 'NEUTRAL',
+    suggested_queue VARCHAR(30) NOT NULL DEFAULT 'GENERAL_SUPPORT'
 );
 
 CREATE TABLE support_settings (
@@ -418,6 +426,20 @@ CREATE TABLE support_settings (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
+
+-- ==================== ACTIVITY LOGS ====================
+
+CREATE TABLE activity_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_name VARCHAR(255) NOT NULL,
+    action VARCHAR(100) NOT NULL,
+    entity VARCHAR(100),
+    entity_id VARCHAR(255),
+    details TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 
 INSERT INTO support_settings (id, enabled)
 VALUES (1, true)
@@ -434,3 +456,15 @@ CREATE INDEX idx_support_messages_created
 
 CREATE INDEX idx_support_messages_unread
     ON support_messages(is_read) WHERE is_read = false AND is_from_user = false;
+
+CREATE INDEX idx_activity_logs_user
+    ON activity_logs(user_id);
+
+CREATE INDEX idx_activity_logs_action
+    ON activity_logs(action);
+
+CREATE INDEX idx_activity_logs_created
+    ON activity_logs(created_at DESC);
+
+CREATE INDEX idx_activity_logs_user_action
+    ON activity_logs(user_id, action);

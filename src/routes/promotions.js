@@ -62,7 +62,7 @@ router.get('/', async (_req, res) => {
 });
 
 // GET /api/promotions/all - Get ALL promotions for admin (active + inactive)
-router.get('/all', authenticate, authorize('ADMIN'), async (_req, res) => {
+router.get('/all', authenticate, authorize('ADMIN', 'SUPPORT'), async (_req, res) => {
   try {
     const result = await pool.query(
       `SELECT p.*, pr.name as product_name, pr.price as product_price,
@@ -96,7 +96,7 @@ router.get('/all', authenticate, authorize('ADMIN'), async (_req, res) => {
 });
 
 // POST /api/promotions - Create promotion (admin)
-router.post('/', authenticate, authorize('ADMIN'), async (req, res) => {
+router.post('/', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, res) => {
   try {
     const { id, type, eyebrow, title, subtitle, link, image, icon, productId, sortOrder, active } = req.body;
 
@@ -115,7 +115,7 @@ router.post('/', authenticate, authorize('ADMIN'), async (req, res) => {
 });
 
 // PUT /api/promotions/:id - Update promotion (admin)
-router.put('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
+router.put('/:id', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, res) => {
   try {
     const { id } = req.params;
     const { type, eyebrow, title, subtitle, link, image, icon, productId, sortOrder, active } = req.body;

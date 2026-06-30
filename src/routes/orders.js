@@ -523,7 +523,7 @@ router.post('/', authenticate, async (req, res) => {
 });
 
 // PUT /api/orders/:id - Update order status
-router.put('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
+router.put('/:id', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;

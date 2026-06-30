@@ -33,7 +33,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/brands - Create brand
-router.post('/', authenticate, authorize('ADMIN'), async (req, res) => {
+router.post('/', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, res) => {
   try {
     const { id, name, logo } = req.body;
     const result = await pool.query(
@@ -48,7 +48,7 @@ router.post('/', authenticate, authorize('ADMIN'), async (req, res) => {
 });
 
 // PUT /api/brands/:id - Update brand
-router.put('/:id', authenticate, authorize('ADMIN'), async (req, res) => {
+router.put('/:id', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, res) => {
   try {
     const { id } = req.params;
     const { name, logo } = req.body;
