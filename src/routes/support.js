@@ -472,4 +472,22 @@ router.post('/check-warning', authenticate, async (req, res) => {
   }
 });
 
+// POST /api/support/check-warning-user - Check if message should trigger warn for the user
+router.post('/check-warning-user', authenticate, async (req, res) => {
+  try {
+    const { message } = req.body;
+
+    if (!message || message.trim() === '') {
+      return res.status(400).json({ error: 'El mensaje es requerido' });
+    }
+
+    const warningCheck = ModerationService.checkWarningUser(message);
+
+    res.json(warningCheck);
+  } catch (error) {
+    console.error('Error checking message warning:', error);
+    res.status(500).json({ error: 'Error al verificar el mensaje' });
+  }
+});
+
 export default router;

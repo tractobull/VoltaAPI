@@ -3,6 +3,15 @@ import { calculateWordScore } from './rules.js';
 import { detectCategories, detectSpam, generateFlags } from './rules.js';
 import { detectPersonalData, detectUrls, detectIPs, getPersonalDataScore } from './patterns.js';
 
+const MODERATION_CATEGORIES = [
+  CATEGORIES.THREAT,
+  CATEGORIES.INSULT,
+  CATEGORIES.HATE,
+  CATEGORIES.HARASSMENT,
+  CATEGORIES.SEXUAL,
+  CATEGORIES.PERSONAL_DATA,
+];
+
 export class ModerationService {
   /**
    * Analiza un mensaje para moderación
@@ -133,6 +142,22 @@ export class ModerationService {
                   analysis.severity === SEVERITY.CRITICAL,
       analysis,
       warningMessage: this._getWarningMessage(analysis),
+    };
+  }
+
+  static checkWarningUser(message) {
+    const analysis = this.analyze(message);
+
+    const shouldWarn = analysis.categories.some(category =>
+      MODERATION_CATEGORIES.includes(category)
+    );
+
+    return {
+      shouldWarn,
+      analysis,
+      warningMessage: shouldWarn
+        ? this._getWarningMessage(analysis)
+        : null,
     };
   }
 
