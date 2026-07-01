@@ -22,6 +22,7 @@ import supportRoutes from './routes/support.js';
 import logRoutes from './routes/logs.js';
 import exportRoutes from './routes/export.js';
 import importRoutes from './routes/import.js';
+import emailRoutes from './routes/email.js';
 
 // Initialize
 const app = express();
@@ -64,6 +65,7 @@ app.use('/api/support', supportRoutes);
 app.use('/api/logs', logRoutes);
 app.use('/api/export', exportRoutes);
 app.use('/api/import', importRoutes);
+app.use('/api/email', emailRoutes);
 
 // Global search
 app.get('/api/search', authenticate, async (req, res) => {

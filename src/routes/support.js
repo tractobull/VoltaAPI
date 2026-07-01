@@ -6,6 +6,7 @@ import {
   emitSupportMessage,
   emitSupportMessageDeleted,
   emitSupportMessagesRead,
+  emitSupportBlockChanged,
   emitSupportReply,
   emitSupportStatus,
   getSupportChatPresence,
@@ -90,6 +91,18 @@ router.post('/messages', authenticate, requireSupportEnabled, async (req, res) =
 
     if (!message || message.trim() === '') {
       return res.status(400).json({ error: 'El mensaje es requerido' });
+    }
+
+    // Check if user is blocked from support
+    const blockCheck = await pool.query(
+      `SELECT * FROM support_blocks WHERE user_id = $1 AND unblocked_at IS NULL`,
+      [userId]
+    );
+    if (blockCheck.rows.length > 0) {
+      return res.status(403).json({
+        code: 'USER_BLOCKED',
+        error: 'Has sido bloqueado de soporte. No puedes enviar mensajes.',
+      });
     }
 
     // Analyze message for moderation
@@ -333,6 +346,19 @@ router.post('/messages/:userId/reply', authenticate, authorize('ADMIN', 'SUPPORT
       });
     }
 
+    // Check if user is blocked from support
+    const blockCheck = await pool.query(
+      `SELECT * FROM support_blocks WHERE user_id = $1 AND unblocked_at IS NULL`,
+      [userId]
+    );
+    if (blockCheck.rows.length > 0) {
+      return res.status(403).json({
+        code: 'USER_BLOCKED',
+        error: 'Este usuario ha sido bloqueado de soporte',
+        block: blockCheck.rows[0],
+      });
+    }
+
     // Analyze message for moderation
     const moderation = ModerationService.analyze(message);
 
@@ -487,6 +513,278 @@ router.post('/check-warning-user', authenticate, async (req, res) => {
   } catch (error) {
     console.error('Error checking message warning:', error);
     res.status(500).json({ error: 'Error al verificar el mensaje' });
+  }
+});
+
+// POST /api/support/ai-advise - Get AI advice about a conversation
+router.post('/ai-advise', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, res) => {
+  try {
+    const { userId, messages: rawMessages } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: 'userId es requerido' });
+    }
+
+    let messages;
+    if (rawMessages && Array.isArray(rawMessages) && rawMessages.length > 0) {
+      messages = rawMessages;
+    } else {
+      const result = await pool.query(
+        `SELECT sm.*, u.name as user_name, u.email as user_email, agent.name as agent_name
+         FROM support_messages sm
+         JOIN users u ON u.id = sm.user_id
+         LEFT JOIN users agent ON agent.id = sm.sender_agent_id
+         WHERE sm.user_id = $1
+         ORDER BY sm.created_at ASC`,
+        [userId]
+      );
+      messages = result.rows;
+    }
+
+    if (messages.length === 0) {
+      return res.status(400).json({ error: 'No hay mensajes en esta conversación' });
+    }
+
+    const recentMessages = messages.length > 20 ? messages.slice(-20) : messages;
+
+    const conversationText = recentMessages.map((msg) => {
+      const sender = msg.is_from_user ? (msg.user_name || 'Cliente') : (msg.agent_name || 'Agente');
+      const time = new Date(msg.created_at).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+      let label = `[${time}] ${sender}: ${msg.message}`;
+      const sev = msg.moderation_severity;
+      const cats = msg.moderation_categories;
+      if (sev && sev !== 'LOW' && cats?.length) {
+        label += ` [MOD: ${sev} - ${cats.join(', ')}]`;
+      }
+      return label;
+    }).join('\n');
+
+    const categories = [...new Set(recentMessages.flatMap((msg) => msg.moderation_categories || []))];
+    const SEVERITY_RANK = { LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3 };
+    const maxSeverity = messages.reduce((highest, m) =>
+      SEVERITY_RANK[m.moderation_severity] > SEVERITY_RANK[highest] ? m.moderation_severity : highest
+    , 'LOW');
+    const maxScore = Math.max(...messages.map((m) => Number(m.moderation_score) || 0));
+    const sentiment = recentMessages[recentMessages.length - 1]?.sentiment || 'NEUTRAL';
+
+    const agentMessages = recentMessages.filter(m => !m.is_from_user);
+
+    const systemPrompt = `Eres un asesor de soporte para Volta, autopartes para camiones.
+
+INSTRUCCIÓN #1 (prioridad máxima): Revisa el último mensaje del cliente. Si comprueba que recibió su pedido o que el problema se resolvió, tu ANÁLISIS debe decirlo, tu RECOMENDACIÓN debe ser cerrar o preguntar si necesita algo más, y tu RESPUESTA SUGERIDA debe ser de cierre profesional y neutral. NO uses tono alegre ("excelente", "me alegra") si la conversación fue tensa o severa. Sé cordial pero serio.
+
+INSTRUCCIÓN #2: Si algún mensaje del AGENTE contiene insultos ("malnacido", "puto", "naco", "estúpido", "inútil") o tiene [MOD: HIGH/CRITICAL/INSULT/HATE/THREAT], el agente insultó al cliente. En ese caso: (a) ANÁLISIS debe decirlo explícitamente ("el agente también insultó al cliente"), (b) RECOMENDACIÓN debe priorizar que el agente se disculpe por SU conducta, (c) la RESPUESTA SUGERIDA debe centrarse en disculpar el insulto del agente, no en el servicio. No ignores los insultos del agente aunque el cliente también haya insultado.
+
+INSTRUCCIÓN #3: No inventes ofertas (reembolsos, descuentos, compensaciones). Di "revisar opciones" o "escalar".
+
+INSTRUCCIÓN #4: NUNCA uses la frase "Lo siento mucho, Cesar. Me doy cuenta de que el servicio que recibió fue inaceptable y me disculpo por el trato inadecuado" ni variaciones. Esa frase está prohibida. Tu RESPUESTA SUGERIDA debe ser original y reflejar el mensaje CONCRETO que el agente necesita enviar ahora.
+
+Contexto: Severidad ${maxSeverity} | Score ${maxScore}/100 | Categorías: ${categories.join(', ') || 'Ninguna'} | Total: ${messages.length} msgs
+
+Últimas respuestas del agente (avanza desde aquí, no repitas):
+${agentMessages.slice(-3).map(m => `- "${m.message}"`).join('\n')}
+
+Conversación:
+${conversationText}
+
+Escribe SOLO esto (sin notas extra):
+ANÁLISIS:
+RECOMENDACIÓN:
+RESPUESTA SUGERIDA:`
+
+    const apiUrl = process.env.GROQ_API_URL || 'https://api.groq.com/openai/v1/chat/completions';
+    const apiKey = process.env.GROQ_API_KEY || '';
+    const model = process.env.GROQ_MODEL || 'llama-3.1-8b-instant';
+
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'system', content: systemPrompt }],
+        temperature: 0.3,
+        max_tokens: 600,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Unknown error');
+      throw new Error(`Groq API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || 'No se pudo generar una recomendación.';
+
+    res.json({
+      advice: content,
+      metadata: {
+        messageCount: messages.length,
+        recentCount: recentMessages.length,
+        severity: maxSeverity,
+        score: maxScore,
+        categories,
+        sentiment,
+      },
+    });
+  } catch (error) {
+    console.error('Error getting AI advice:', error);
+    res.status(500).json({ error: 'Error al obtener recomendación de IA' });
+  }
+});
+
+// POST /api/support/block - Block a user from support
+router.post('/block', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, res) => {
+  try {
+    const { userId, reason } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: 'userId es requerido' });
+    }
+    const blockReason = reason?.trim() || 'Comportamiento inadecuado';
+
+    const existing = await pool.query(
+      `SELECT * FROM support_blocks WHERE user_id = $1 AND unblocked_at IS NULL`,
+      [userId]
+    );
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ error: 'El usuario ya está bloqueado', block: existing.rows[0] });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO support_blocks (user_id, blocked_by, reason) VALUES ($1, $2, $3) RETURNING *`,
+      [userId, req.user.id, blockReason]
+    );
+
+    emitSupportBlockChanged(userId, true, blockReason);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error blocking user:', error);
+    res.status(500).json({ error: 'Error al bloquear usuario' });
+  }
+});
+
+// POST /api/support/unblock - Unblock a user from support
+router.post('/unblock', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, res) => {
+  try {
+    const { userId, reason } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: 'userId es requerido' });
+    }
+
+    const result = await pool.query(
+      `UPDATE support_blocks
+       SET unblocked_at = NOW(), unblocked_by = $2, unblock_reason = $3
+       WHERE user_id = $1 AND unblocked_at IS NULL
+       RETURNING *`,
+      [userId, req.user.id, reason || null]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'El usuario no está bloqueado' });
+    }
+
+    emitSupportBlockChanged(userId, false, reason || null);
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error unblocking user:', error);
+    res.status(500).json({ error: 'Error al desbloquear usuario' });
+  }
+});
+
+// GET /api/support/block-status/:userId - Check if user is blocked
+router.get('/block-status/:userId', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const result = await pool.query(
+      `SELECT sb.*, blocker.name AS blocked_by_name, unblocker.name AS unblocked_by_name
+       FROM support_blocks sb
+       LEFT JOIN users blocker ON blocker.id = sb.blocked_by
+       LEFT JOIN users unblocker ON unblocker.id = sb.unblocked_by
+       WHERE sb.user_id = $1
+       ORDER BY sb.created_at DESC`,
+      [userId]
+    );
+
+    const active = result.rows.find(r => !r.unblocked_at) || null;
+    res.json({ active, history: result.rows });
+  } catch (error) {
+    console.error('Error checking block status:', error);
+    res.status(500).json({ error: 'Error al verificar estado de bloqueo' });
+  }
+});
+
+// GET /api/support/blocked - Check if current user is blocked (user-facing)
+router.get('/blocked', authenticate, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, reason, created_at FROM support_blocks WHERE user_id = $1 AND unblocked_at IS NULL`,
+      [req.user.id]
+    );
+    res.json({ blocked: result.rows.length > 0, block: result.rows[0] || null });
+  } catch (error) {
+    console.error('Error checking block status:', error);
+    res.status(500).json({ error: 'Error al verificar estado de bloqueo' });
+  }
+});
+
+// POST /api/support/appeal - User appeals their support block
+router.post('/appeal', authenticate, async (req, res) => {
+  try {
+    const { reason } = req.body;
+    if (!reason || reason.trim().length === 0) {
+      return res.status(400).json({ error: 'El motivo de apelación es requerido' });
+    }
+
+    const activeBlock = await pool.query(
+      `SELECT * FROM support_blocks WHERE user_id = $1 AND unblocked_at IS NULL`,
+      [req.user.id]
+    );
+
+    if (activeBlock.rows.length === 0) {
+      return res.status(404).json({ error: 'No tienes un bloqueo activo' });
+    }
+
+    const result = await pool.query(
+      `UPDATE support_blocks
+       SET appeal_text = $1, appealed_at = NOW()
+       WHERE id = $2
+       RETURNING *`,
+      [reason.trim(), activeBlock.rows[0].id]
+    );
+
+    emitSupportBlockChanged(req.user.id, true, activeBlock.rows[0].reason);
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error recording appeal:', error);
+    res.status(500).json({ error: 'Error al registrar apelación' });
+  }
+});
+
+// POST /api/support/moderation-feedback - Record agent action on moderation findings
+router.post('/moderation-feedback', authenticate, authorize('ADMIN', 'SUPPORT'), async (req, res) => {
+  try {
+    const { userId, action, categories } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'userId es requerido' });
+    }
+    if (!action || !['dismissed', 'false_positive'].includes(action)) {
+      return res.status(400).json({ error: 'action debe ser "dismissed" o "false_positive"' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO support_moderation_feedback (user_id, agent_id, action, categories)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [userId, req.user.id, action, categories || []]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error recording moderation feedback:', error);
+    res.status(500).json({ error: 'Error al registrar retroalimentación de moderación' });
   }
 });
 

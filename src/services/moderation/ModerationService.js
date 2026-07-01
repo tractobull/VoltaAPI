@@ -133,13 +133,31 @@ export class ModerationService {
    * @param {string} message - El mensaje a verificar
    * @returns {Object} Resultado de la verificación de advertencia
    */
+  static PROBLEMATIC_CATEGORIES = [
+    CATEGORIES.THREAT,
+    CATEGORIES.INSULT,
+    CATEGORIES.HATE,
+    CATEGORIES.HARASSMENT,
+    CATEGORIES.SEXUAL,
+    CATEGORIES.PERSONAL_DATA,
+    CATEGORIES.LEGAL,
+    CATEGORIES.FRAUD_REPORT,
+    CATEGORIES.CHARGEBACK,
+  ];
+
   static checkWarning(message) {
     const analysis = this.analyze(message);
     
+    const hasProblematicCategory = analysis.categories.some(c =>
+      ModerationService.PROBLEMATIC_CATEGORIES.includes(c)
+    );
+
+    const shouldWarn = analysis.severity === SEVERITY.CRITICAL ||
+      analysis.severity === SEVERITY.HIGH ||
+      (analysis.severity === SEVERITY.MEDIUM && hasProblematicCategory);
+
     return {
-      shouldWarn: analysis.severity === SEVERITY.MEDIUM || 
-                  analysis.severity === SEVERITY.HIGH ||
-                  analysis.severity === SEVERITY.CRITICAL,
+      shouldWarn,
       analysis,
       warningMessage: this._getWarningMessage(analysis),
     };

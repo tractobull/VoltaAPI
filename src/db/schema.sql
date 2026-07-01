@@ -41,6 +41,17 @@ CREATE TABLE users (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- ==================== PASSWORD RESET CODES ====================
+
+CREATE TABLE password_reset_codes (
+    id SERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code VARCHAR(6) NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- ==================== ADDRESSES ====================
 
 CREATE TABLE addresses (
@@ -333,6 +344,67 @@ CREATE TABLE IF NOT EXISTS inventory (
     UNIQUE(product_id, warehouse_id)
 );
 
+-- Support chat messages table
+CREATE TABLE support_messages (
+    id SERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    sender_agent_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    message TEXT NOT NULL,
+    is_from_user BOOLEAN NOT NULL DEFAULT true,
+    is_read BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    -- Moderation data
+    moderation_score INTEGER DEFAULT 0,
+    moderation_severity VARCHAR(20) DEFAULT 'LOW',
+    moderation_categories TEXT[] DEFAULT '{}',
+    moderation_flags TEXT[] DEFAULT '{}',
+    moderation_priority BOOLEAN DEFAULT false,
+    sentiment VARCHAR(20) NOT NULL DEFAULT 'NEUTRAL',
+    suggested_queue VARCHAR(30) NOT NULL DEFAULT 'GENERAL_SUPPORT'
+);
+
+CREATE TABLE support_settings (
+    id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    enabled BOOLEAN NOT NULL DEFAULT true,
+    updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Support blocks table for blocking users from support
+
+CREATE TABLE IF NOT EXISTS support_blocks (
+    id SERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    blocked_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reason TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    unblocked_at TIMESTAMPTZ,
+    unblocked_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    unblock_reason TEXT,
+    appeal_text TEXT,
+    appealed_at TIMESTAMPTZ
+);
+
+-- ==================== ACTIVITY LOGS ====================
+
+CREATE TABLE activity_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_name VARCHAR(255) NOT NULL,
+    action VARCHAR(100) NOT NULL,
+    entity VARCHAR(100),
+    entity_id VARCHAR(255),
+    details TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+
+INSERT INTO support_settings (id, enabled)
+VALUES (1, true)
+ON CONFLICT (id) DO NOTHING;
+
 
 -- ==================== INDEXES ====================
 
@@ -399,52 +471,6 @@ CREATE INDEX idx_inventory_product
 CREATE INDEX idx_inventory_warehouse
     ON inventory(warehouse_id);
 
--- Support chat messages table
-CREATE TABLE support_messages (
-    id SERIAL PRIMARY KEY,
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    sender_agent_id UUID REFERENCES users(id) ON DELETE SET NULL,
-    message TEXT NOT NULL,
-    is_from_user BOOLEAN NOT NULL DEFAULT true,
-    is_read BOOLEAN NOT NULL DEFAULT false,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    -- Moderation data
-    moderation_score INTEGER DEFAULT 0,
-    moderation_severity VARCHAR(20) DEFAULT 'LOW',
-    moderation_categories TEXT[] DEFAULT '{}',
-    moderation_flags TEXT[] DEFAULT '{}',
-    moderation_priority BOOLEAN DEFAULT false,
-    sentiment VARCHAR(20) NOT NULL DEFAULT 'NEUTRAL',
-    suggested_queue VARCHAR(30) NOT NULL DEFAULT 'GENERAL_SUPPORT'
-);
-
-CREATE TABLE support_settings (
-    id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-    enabled BOOLEAN NOT NULL DEFAULT true,
-    updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-);
-
--- ==================== ACTIVITY LOGS ====================
-
-CREATE TABLE activity_logs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    user_name VARCHAR(255) NOT NULL,
-    action VARCHAR(100) NOT NULL,
-    entity VARCHAR(100),
-    entity_id VARCHAR(255),
-    details TEXT NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-
-INSERT INTO support_settings (id, enabled)
-VALUES (1, true)
-ON CONFLICT (id) DO NOTHING;
-
 CREATE INDEX idx_support_messages_user
     ON support_messages(user_id);
 
@@ -468,3 +494,16 @@ CREATE INDEX idx_activity_logs_created
 
 CREATE INDEX idx_activity_logs_user_action
     ON activity_logs(user_id, action);
+
+CREATE INDEX IF NOT EXISTS idx_support_blocks_user_id
+    ON support_blocks(user_id);
+
+CREATE INDEX IF NOT EXISTS idx_support_blocks_active
+    ON support_blocks(user_id)
+    WHERE unblocked_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_codes_user_id
+    ON password_reset_codes(user_id);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_codes_code
+    ON password_reset_codes(code);

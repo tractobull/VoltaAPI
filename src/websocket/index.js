@@ -182,6 +182,13 @@ export function emitSupportMessagesRead(userId, messageIds, reader) {
   io.to('support:admin').emit('support_messages_read', payload);
 }
 
+export function emitSupportBlockChanged(userId, blocked, reason) {
+  if (!io) return;
+  const payload = { userId, blocked, reason };
+  io.to(`support:${userId}`).emit('support_block_changed', payload);
+  io.to('support:admin').emit('support_block_changed', payload);
+}
+
 export function getSupportChatPresence(userId) {
   if (!userId) {
     return Object.fromEntries(

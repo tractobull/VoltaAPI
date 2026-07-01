@@ -3,6 +3,7 @@ import bcrypt from 'bcrypt';
 import pool from '../db/pool.js';
 import { authenticate, authorize, generateToken } from '../middleware/auth.js';
 import { strictRateLimit } from '../middleware/rateLimit.js';
+import { sendEmail } from '../services/emailService.js';
 
 const router = Router();
 
@@ -95,14 +96,14 @@ router.post('/login', strictRateLimit(), async (req, res) => {
     );
     
     if (result.rows.length === 0) {
-      return res.status(401).json({ error: 'Credenciales invalidas' });
+      return res.status(400).json({ error: 'Credenciales invalidas' });
     }
     
     const user = result.rows[0];
     const validPassword = await bcrypt.compare(password, user.password);
     
     if (!validPassword) {
-      return res.status(401).json({ error: 'Credenciales invalidas' });
+      return res.status(400).json({ error: 'Credenciales invalidas' });
     }
     
     const token = generateToken(user);
@@ -486,6 +487,129 @@ router.delete('/:id/favorites/:productId', authenticate, async (req, res) => {
   } catch (error) {
     console.error('Error removing favorite:', error);
     res.status(500).json({ error: 'Error al eliminar de favoritos' });
+  }
+});
+
+// ==================== PASSWORD RESET ====================
+
+// POST /api/users/forgot-password - Send reset code via email
+router.post('/forgot-password', strictRateLimit(), async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'El email es requerido' });
+    }
+
+    const userResult = await pool.query(
+      'SELECT id, name, email FROM users WHERE email = $1',
+      [email]
+    );
+
+    // Don't reveal whether email exists
+    if (userResult.rows.length === 0) {
+      return res.json({ message: 'Si el correo está registrado, recibirás un código de recuperación.', sent: false });
+    }
+
+    const user = userResult.rows[0];
+
+    // Invalidate any previous unused codes for this user
+    await pool.query(
+      `UPDATE password_reset_codes SET used_at = NOW()
+       WHERE user_id = $1 AND used_at IS NULL AND expires_at > NOW()`,
+      [user.id]
+    );
+
+    // Generate 6-digit code
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+    await pool.query(
+      `INSERT INTO password_reset_codes (user_id, code, expires_at) VALUES ($1, $2, $3)`,
+      [user.id, code, expiresAt]
+    );
+
+    // Send email
+    const emailResult = await sendEmail({
+      to: user.email,
+      subject: 'Código de recuperación - Volta',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto;">
+          <h2 style="color: #0A0A0A;">Recuperación de cuenta</h2>
+          <p style="color: #5C5C5C; font-size: 15px;">Hola ${user.name || 'usuario'},</p>
+          <p style="color: #5C5C5C; font-size: 15px;">Usa el siguiente código para restablecer tu contraseña:</p>
+          <div style="background: #F5F5F5; border-radius: 12px; padding: 20px; text-align: center; margin: 20px 0;">
+            <span style="font-size: 32px; font-weight: 700; letter-spacing: 8px; color: #0A0A0A;">${code}</span>
+          </div>
+          <p style="color: #9C9C9C; font-size: 13px;">Este código expira en 15 minutos.</p>
+          <p style="color: #9C9C9C; font-size: 13px;">Si no solicitaste este cambio, ignora este mensaje.</p>
+          <p style="color: #9C9C9C; font-size: 13px;">Este es un correo automático, por favor no respondas a este mensaje.</p>
+        </div>
+      `,
+    });
+
+    if (!emailResult.ok) {
+      console.error('Failed to send reset email:', emailResult.error);
+    }
+
+    res.json({ message: 'Si el correo está registrado, recibirás un código de recuperación.', sent: true });
+  } catch (error) {
+    console.error('Error in forgot-password:', error);
+    res.status(500).json({ error: 'Error al procesar la solicitud' });
+  }
+});
+
+// POST /api/users/reset-password - Verify code and update password
+router.post('/reset-password', strictRateLimit(), async (req, res) => {
+  try {
+    const { email, code, password } = req.body;
+
+    if (!email || !code || !password) {
+      return res.status(400).json({ error: 'Email, código y nueva contraseña son requeridos' });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+    }
+
+    // Find user
+    const userResult = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+    if (userResult.rows.length === 0) {
+      return res.status(400).json({ error: 'Código inválido o expirado' });
+    }
+
+    const userId = userResult.rows[0].id;
+
+    // Find valid code
+    const codeResult = await pool.query(
+      `SELECT id FROM password_reset_codes
+       WHERE user_id = $1 AND code = $2 AND used_at IS NULL AND expires_at > NOW()
+       ORDER BY created_at DESC LIMIT 1`,
+      [userId, code]
+    );
+
+    if (codeResult.rows.length === 0) {
+      return res.status(400).json({ error: 'Código inválido o expirado' });
+    }
+
+    // Mark code as used
+    await pool.query(
+      `UPDATE password_reset_codes SET used_at = NOW() WHERE id = $1`,
+      [codeResult.rows[0].id]
+    );
+
+    // Update password
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    await pool.query(
+      'UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2',
+      [hashedPassword, userId]
+    );
+
+    res.json({ message: 'Contraseña actualizada correctamente' });
+  } catch (error) {
+    console.error('Error in reset-password:', error);
+    res.status(500).json({ error: 'Error al restablecer la contraseña' });
   }
 });
 

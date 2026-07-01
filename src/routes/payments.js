@@ -19,6 +19,103 @@ async function withRetry(fn, maxRetries = 3) {
   throw new Error('Max retries exceeded');
 }
 
+export function createCustomerRecreationGuard() {
+  const pendingCreations = new Map();
+
+  return {
+    async run(userId, operation) {
+      const existing = pendingCreations.get(userId);
+      if (existing) {
+        return existing;
+      }
+
+      const task = (async () => {
+        try {
+          return await operation();
+        } finally {
+          pendingCreations.delete(userId);
+        }
+      })();
+
+      pendingCreations.set(userId, task);
+      return task;
+    },
+  };
+}
+
+export function isMissingCustomerError(error) {
+  return (
+    (error?.code === 'resource_missing' && error?.param === 'customer') ||
+    (error?.type === 'StripeInvalidRequestError' && error?.code === 'resource_missing')
+  );
+}
+
+async function createStripeCustomerForUser(userId, email, name) {
+  const customer = await withRetry(() =>
+    stripe.customers.create({
+      email,
+      name,
+      metadata: { userId },
+    })
+  );
+  await pool.query(
+    'UPDATE users SET stripe_customer_id = $1 WHERE id = $2',
+    [customer.id, userId]
+  );
+  return customer;
+}
+
+const customerRecreationGuard = createCustomerRecreationGuard();
+
+async function ensureValidCustomer(customerId, userId, forceRecreate = false) {
+  if (!forceRecreate) {
+    try {
+      await stripe.customers.retrieve(customerId);
+      console.log('[ensureValidCustomer] Customer valid:', customerId);
+      return customerId;
+    } catch (error) {
+      console.log('[ensureValidCustomer] Error retrieving customer:', error.code, error.param);
+      if (isMissingCustomerError(error)) {
+        console.log('[ensureValidCustomer] Recreating customer for user:', userId);
+      } else {
+        console.error('[ensureValidCustomer] Unexpected error:', error);
+        throw error;
+      }
+    }
+  }
+
+  return customerRecreationGuard.run(userId, async () => {
+    const userResult = await pool.query(
+      'SELECT stripe_customer_id, email, name FROM users WHERE id = $1',
+      [userId]
+    );
+
+    if (userResult.rows.length === 0) {
+      console.error('[ensureValidCustomer] User not found:', userId);
+      throw new Error('User not found');
+    }
+
+    const { stripe_customer_id: dbCustomerId, email, name } = userResult.rows[0];
+
+    if (dbCustomerId && dbCustomerId !== customerId) {
+      try {
+        await stripe.customers.retrieve(dbCustomerId);
+        console.log('[ensureValidCustomer] Reusing customer from DB after concurrent update:', dbCustomerId);
+        return dbCustomerId;
+      } catch (error) {
+        if (!isMissingCustomerError(error)) {
+          throw error;
+        }
+      }
+    }
+
+    console.log('[ensureValidCustomer] Creating new customer for:', email);
+    const newCustomer = await createStripeCustomerForUser(userId, email, name);
+    console.log('[ensureValidCustomer] New customer created:', newCustomer.id);
+    return newCustomer.id;
+  });
+}
+
 const router = Router();
 
 // Initialize Stripe with test key (sandbox mode)
@@ -27,7 +124,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '')
 // POST /api/payments/customer - Create or get Stripe customer for user
 router.post('/customer', authenticate, async (req, res) => {
   try {
-    const { userId, email, name } = req.body;
+    const { userId, email, name, skipValidation } = req.body;
 
     // Check if user already has a Stripe customer ID
     const userResult = await pool.query(
@@ -36,7 +133,26 @@ router.post('/customer', authenticate, async (req, res) => {
     );
 
     if (userResult.rows.length > 0 && userResult.rows[0].stripe_customer_id) {
-      return res.json({ customerId: userResult.rows[0].stripe_customer_id });
+      const existingCustomerId = userResult.rows[0].stripe_customer_id;
+
+      // If skipValidation is true, return the DB value without checking Stripe
+      if (skipValidation) {
+        console.log('[/customer] Skipping validation, returning DB value:', existingCustomerId);
+        return res.json({ customerId: existingCustomerId });
+      }
+
+      // Validate the existing customer ID
+      try {
+        await withRetry(() => stripe.customers.retrieve(existingCustomerId));
+        return res.json({ customerId: existingCustomerId });
+      } catch (error) {
+        if (error?.code === 'resource_missing' && error?.param === 'customer') {
+          console.log('[/customer] Existing customer is invalid, recreating:', existingCustomerId);
+          // Customer is invalid, will create new one below
+        } else {
+          throw error;
+        }
+      }
     }
 
     // Create new Stripe customer
@@ -73,9 +189,11 @@ router.post('/setup-intent', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Customer ID required' });
     }
 
+    const validCustomerId = await ensureValidCustomer(customerId, req.user.id);
+
     const setupIntent = await withRetry(() =>
       stripe.setupIntents.create({
-        customer: customerId,
+        customer: validCustomerId,
       })
     );
 
@@ -89,20 +207,49 @@ router.post('/setup-intent', authenticate, async (req, res) => {
   }
 });
 
-// GET /api/payments/methods/:customerId - List saved payment methods
-router.get('/methods/:customerId', authenticate, async (req, res) => {
+// GET /api/payments/methods - List saved payment methods
+router.get('/methods', authenticate, async (req, res) => {
   try {
-    const customerId = req.params.customerId;
-
-    const paymentMethods = await withRetry(() =>
-      stripe.paymentMethods.list({
-        customer: customerId,
-        type: 'card',
-      })
+    // Get customer ID from database using userId from token
+    const userResult = await pool.query(
+      'SELECT stripe_customer_id FROM users WHERE id = $1',
+      [req.user.id]
     );
 
+    if (userResult.rows.length === 0 || !userResult.rows[0].stripe_customer_id) {
+      return res.json([]);
+    }
+
+    const customerId = userResult.rows[0].stripe_customer_id;
+
+    let finalCustomerId = await ensureValidCustomer(customerId, req.user.id);
+
+    let paymentMethods;
+    try {
+      paymentMethods = await withRetry(() =>
+        stripe.paymentMethods.list({
+          customer: finalCustomerId,
+          type: 'card',
+        })
+      );
+    } catch (error) {
+      // If paymentMethods.list fails with resource_missing, force recreate customer
+      if (error?.code === 'resource_missing' && error?.param === 'customer') {
+        console.log('[/methods] paymentMethods.list failed, force recreating customer');
+        finalCustomerId = await ensureValidCustomer(customerId, req.user.id, true);
+        paymentMethods = await withRetry(() =>
+          stripe.paymentMethods.list({
+            customer: finalCustomerId,
+            type: 'card',
+          })
+        );
+      } else {
+        throw error;
+      }
+    }
+
     // Get the default payment method for this customer
-    const customer = await stripe.customers.retrieve(customerId);
+    const customer = await stripe.customers.retrieve(finalCustomerId);
     const defaultPaymentMethodId = customer.invoice_settings?.default_payment_method;
 
     const methods = paymentMethods.data.map((pm) => ({
@@ -129,8 +276,10 @@ router.post('/set-default', authenticate, async (req, res) => {
   try {
     const { customerId, paymentMethodId } = req.body;
 
+    const validCustomerId = await ensureValidCustomer(customerId, req.user.id);
+
     await withRetry(() =>
-      stripe.customers.update(customerId, {
+      stripe.customers.update(validCustomerId, {
         invoice_settings: {
           default_payment_method: paymentMethodId,
         },
@@ -170,10 +319,12 @@ router.post('/charge', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
+    const validCustomerId = await ensureValidCustomer(customerId, req.user.id);
+
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(amount * 100), // Convert to cents
       currency: currency || 'mxn',
-      customer: customerId,
+      customer: validCustomerId,
       payment_method: paymentMethodId,
       confirm: true,
       automatic_payment_methods: {

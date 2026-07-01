@@ -12,7 +12,7 @@ export const MODERATION_RULES = [
   // ===== AMENAZAS =====
   rule(CATEGORIES.THREAT, 100, /\b(?:te\s+)?voy\s+a\s+(?:matar|asesinar|ejecutar|eliminar|tronar|quebrar)\b/, 'Amenaza directa contra una persona'),
   rule(CATEGORIES.THREAT, 100, /\bte\s+(?:matare|mato|asesinare|asesino|ejecuto|elimino|trono|quiebro)\b/, 'Amenaza directa contra una persona'),
-  rule(CATEGORIES.THREAT, 95, /\b(?:quiero\s+matarte|te\s+quiero\s+matar|voy\s+a\s+acabar\s+contigo|te\s+voy\s+a\s+acabar)\b/, 'Amenaza de muerte explícita'),
+  rule(CATEGORIES.THREAT, 95, /\b(?:quiero\s+matarte|te\s+quiero\s+matar|voy\s+a\s+acabar\s+contigo|te\s+voy\s+a\s+acabar|desollar)\b/, 'Amenaza de muerte explícita'),
   rule(CATEGORIES.THREAT, 90, /\b(?:muere|muérete|vas\s+a\s+morir|te\s+vas\s+a\s+morir|te\s+mueres|ojala\s+te\s+mueras)\b/, 'Deseo o amenaza de muerte'),
   rule(CATEGORIES.THREAT, 85, /\b(?:te\s+voy\s+a\s+(?:destruir|aniquilar|hacer\s+picadillo|hacer\s+pedazos))\b/, 'Amenaza de daño extremo'),
   rule(CATEGORIES.THREAT, 80, /\b(?:amenaza|amenazas|amenazar|amenazarte|amenazando|amenazare)\b/, 'Mención explícita de amenaza'),
@@ -60,7 +60,7 @@ export const MODERATION_RULES = [
 
   // ===== INSULTOS =====
   rule(CATEGORIES.INSULT, 35, /\b(?:hijo\s+de\s+(?:puta|perra|la\s+chingada)|hijoputa|hijueputa|hijuesuputamadre)\b/, 'Insulto directo'),
-  rule(CATEGORIES.INSULT, 30, /\b(?:imbecil|puto|puta|zorra|hdp|cerdo|cerda|marrano|marrana)\b/, 'Insulto directo'),
+  rule(CATEGORIES.INSULT, 30, /\b(?:imbecil(?:es)?|puto+|puta+|zorra+|hdp+|cerdo+|cerda+|marrano+|marrana+)\b/, 'Insulto directo'),
   rule(CATEGORIES.INSULT, 25, /\b(?:idiota|pendejo|pendeja|estupido|estupida|burro|burra|inutil|culero|culera|estupidazo|estupidaza)\b/, 'Insulto directo'),
   rule(CATEGORIES.INSULT, 20, /\b(?:tonto|tonta|mierda|basura|porqueria|mediocre)\b/, 'Lenguaje ofensivo'),
   rule(CATEGORIES.INSULT, 18, /\b(?:chingada|chingado|chingar|pinche|joder|jodido|jodida|carajo|diablos)\b/, 'Lenguaje ofensivo'),
@@ -87,7 +87,7 @@ export const MODERATION_RULES = [
   rule(CATEGORIES.SEXUAL, 45, /\b(?:quiero\s+verte|te\s+quiero\s+ver|me\s+gustaria\s+verte)\s+(?:desnuda|desnudo|sin\s+ropa|encuerada|encuerado)\b/, 'Solicitud sexual dirigida'),
   rule(CATEGORIES.SEXUAL, 35, /\b(?:estas|te\s+ves|te\s+miras)\s+(?:bien\s+)?(?:buena|bueno|sexy|sensual|rica|rico|cuerazo|papasito|mamasita)\b/, 'Comentario sexual dirigido'),
   rule(CATEGORIES.SEXUAL, 45, /\b(?:que\s+rico\s+cuerpo|quiero\s+tu\s+cuerpo|ensen[a-z]*\s+el\s+cuerpo|que\s+bien\s+te\s+ves|me\s+excitas|me\s+pones\s+caliente)\b/, 'Comentario sexual explícito'),
-  rule(CATEGORIES.SEXUAL, 40, /\b(?:prostitucion|prostituta|prostituto|puta|puto|ramera|golfo|golfa)\b/, 'Términos sexuales ofensivos'),
+  rule(CATEGORIES.SEXUAL, 40, /\b(?:prostitucion|prostituta|prostituto|ramera|golfo|golfa)\b/, 'Términos sexuales ofensivos'),
   rule(CATEGORIES.SEXUAL, 35, /\b(?:acostarte\s+conmigo|quiero\s+acostarme\s+contigo|tener\s+relaciones|tener\s+sexo)\b/, 'Proposición sexual directa'),
   rule(CATEGORIES.SEXUAL, 50, /\b(?:manosear|manosearte|sobarte|sobarte\s+el\s+cuerpo|meterte\s+mano)\b/, 'Contacto sexual no consentido'),
 
